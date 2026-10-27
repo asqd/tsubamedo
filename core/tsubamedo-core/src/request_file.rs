@@ -27,7 +27,20 @@
 //! follow_redirects = false
 //! timeout_ms = 5000
 //! verify_tls = false
+//!
+//! # What the response must be (see `checks`); a check can be switched off in place.
+//! checks = [
+//!   'status == 200',
+//!   '$.items count > 0',
+//!   { check = '$.debug not exists', enabled = false },
+//! ]
+//!
+//! # Values from the response for other requests: they use {{token}}.
+//! [capture]
+//! token = '$.token'
 //! ```
+//!
+//! (`checks` is written before the first table, as TOML requires of top-level keys.)
 //!
 //! [`RequestFile::update`] edits the parsed document in place and touches only the values that
 //! differ, so comments, order and formatting survive and a save without changes rewrites
@@ -38,7 +51,7 @@ use std::path::{Path, PathBuf};
 
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
-use crate::model::{ApiKeyLocation, Auth, Body, Pair, Part, Request, RequestOptions};
+use crate::model::{ApiKeyLocation, Auth, Body, Check, Pair, Part, Request, RequestOptions};
 use crate::{Error, Result};
 
 pub struct RequestFile {
@@ -98,6 +111,8 @@ impl RequestFile {
         sync_auth(root, &request.auth);
         sync_body(root, &request.body);
         sync_options(root, &request.options);
+        sync_pairs(root, "capture", &request.captures);
+        sync_checks(root, &request.checks);
     }
 
     pub fn text(&self) -> String {
@@ -138,7 +153,26 @@ pub(crate) fn parse_request(root: &Item) -> Result<Request, String> {
         auth: parse_auth(t.get("auth"))?,
         body: parse_body(t.get("body"))?,
         options: parse_options(t.get("options"))?,
+        captures: pairs(t.get("capture"), "capture")?,
+        checks: parse_checks(t.get("checks"))?,
     })
+}
+
+fn parse_checks(item: Option<&Item>) -> Result<Vec<Check>, String> {
+    let Some(item) = item else { return Ok(Vec::new()) };
+    let array = item.as_array().ok_or("checks должен быть списком строк")?;
+    array.iter().map(parse_check).collect()
+}
+
+fn parse_check(v: &Value) -> Result<Check, String> {
+    match v {
+        Value::String(s) => Ok(Check::new(s.value().clone())),
+        Value::InlineTable(t) => Ok(Check {
+            text: opt_str(t, "check")?.ok_or("checks: у { … } нет check")?,
+            enabled: opt_bool(t, "enabled")?.unwrap_or(true),
+        }),
+        _ => Err("checks: нужна строка или { check = \"…\", enabled = false }".to_string()),
+    }
 }
 
 /// One value of a pair table: text, or a file in multipart forms.
@@ -519,6 +553,63 @@ fn sync_body(root: &mut Item, body: &Body) {
     }
 }
 
+/// A check as written: in single quotes when it has double ones, so `$.name == "Кот"` stays
+/// readable.
+fn check_string(s: &str) -> Value {
+    if s.contains('"')
+        && !s.contains('\'')
+        && !s.chars().any(char::is_control)
+        && let Ok(doc) = format!("v = '{s}'").parse::<DocumentMut>()
+        && let Some(mut v) = doc.get("v").and_then(Item::as_value).cloned()
+    {
+        v.decor_mut().clear();
+        return v;
+    }
+    Value::from(s)
+}
+
+/// One check per line, so adding or editing one shows as one line in the diff.
+fn sync_checks(root: &mut Item, checks: &[Check]) {
+    if parse_checks(root.get("checks")).as_deref() == Ok(checks) {
+        return;
+    }
+    if checks.is_empty() {
+        remove(root, "checks");
+        return;
+    }
+    // Lines that stay are kept as they were written, quotes and all.
+    let old: Vec<(Check, Value)> = root
+        .get("checks")
+        .and_then(Item::as_array)
+        .map(|a| a.iter().filter_map(|v| Some((parse_check(v).ok()?, v.clone()))).collect())
+        .unwrap_or_default();
+    let mut array = Array::new();
+    for c in checks {
+        if let Some((_, v)) = old.iter().find(|(o, _)| o == c) {
+            let mut value = v.clone();
+            value.decor_mut().set_prefix("\n  ");
+            value.decor_mut().set_suffix("");
+            array.push_formatted(value);
+            continue;
+        }
+        let mut value = if c.enabled {
+            check_string(&c.text)
+        } else {
+            let mut t = InlineTable::new();
+            t.insert("check", check_string(&c.text));
+            t.insert("enabled", false.into());
+            t.fmt();
+            Value::InlineTable(t)
+        };
+        value.decor_mut().set_prefix("\n  ");
+        array.push_formatted(value);
+    }
+    array.set_trailing_comma(true);
+    array.set_trailing("\n");
+    let t = root.as_table_like_mut().expect("document root is a table");
+    set_value(t, "checks", Value::Array(array));
+}
+
 fn sync_options(root: &mut Item, options: &RequestOptions) {
     if *options == RequestOptions::default() {
         remove(root, "options");
@@ -625,6 +716,41 @@ content = '''
         r.options = RequestOptions::default();
         f.update(&r);
         assert!(!f.text().contains("[body") && !f.text().contains("[auth]") && !f.text().contains("[options]"), "{}", f.text());
+    }
+
+    #[test]
+    fn checks_and_captures_round_trip() {
+        let mut f = sample();
+        let mut r = f.request().unwrap();
+        r.checks = vec![Check::new("status == 201"), Check::new("$.name == \"Кот\""), Check { text: "time < 500".into(), enabled: false }];
+        r.captures = vec![Pair::new("order_id", "$.id")];
+        f.update(&r);
+        let text = f.text();
+        assert!(
+            text.contains("checks = [\n  \"status == 201\",\n  '$.name == \"Кот\"',\n  { check = \"time < 500\", enabled = false },\n]\n"),
+            "{text}"
+        );
+        assert!(text.find("checks = [").unwrap() < text.find("[query]").unwrap(), "{text}");
+        assert!(text.ends_with("[capture]\norder_id = \"$.id\"\n"), "{text}");
+        assert_eq!(f.request().unwrap(), r);
+        let saved = f.text();
+        f.update(&r);
+        assert_eq!(f.text(), saved);
+
+        r.checks[0].text = "status == 200".into();
+        f.update(&r);
+        assert_eq!(f.text(), saved.replace("status == 201", "status == 200"));
+        // A line written by hand in single quotes keeps them when another line changes.
+        let hand = f.text().replace("\"status == 200\"", "'status == 200'");
+        let mut f = RequestFile::parse("orders/create.toml", hand.clone()).unwrap();
+        r.checks.push(Check::new("size < 100"));
+        f.update(&r);
+        assert_eq!(f.text(), hand.replace("  { check = \"time < 500\", enabled = false },\n", "  { check = \"time < 500\", enabled = false },\n  \"size < 100\",\n"));
+        r.checks.pop();
+        r.checks.clear();
+        r.captures.clear();
+        f.update(&r);
+        assert_eq!(f.text(), SAMPLE);
     }
 
     #[test]

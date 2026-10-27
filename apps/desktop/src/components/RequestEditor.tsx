@@ -3,12 +3,13 @@ import { useState } from "react";
 import { Auth, Body, Part, Request } from "../api";
 import { key } from "../platform";
 import { missingVars, useVars } from "../vars";
+import { ChecksEditor } from "./ChecksEditor";
 import { CodeEditor } from "./CodeEditor";
 import { PairsTable } from "./PairsTable";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
-type Tab = "query" | "headers" | "auth" | "body" | "options";
+type Tab = "query" | "headers" | "auth" | "body" | "checks" | "options";
 
 export function RequestEditor({
   request,
@@ -39,6 +40,7 @@ export function RequestEditor({
     ["headers", "Заголовки", on(request.headers) || null],
     ["auth", "Авторизация", request.auth.type === "none" ? null : "●"],
     ["body", "Тело", request.body.type === "none" ? null : "●"],
+    ["checks", "Проверки", on(request.checks) + on(request.captures) || null],
     ["options", "Настройки", Object.values(request.options).some((v) => v != null) ? "●" : null],
   ];
 
@@ -100,6 +102,16 @@ export function RequestEditor({
         )}
         {tab === "auth" && <AuthEditor auth={request.auth} onChange={(auth) => set({ auth })} />}
         {tab === "body" && <BodyEditor body={request.body} onChange={(body) => set({ body })} onSubmit={onSend} />}
+        {tab === "checks" && (
+          <ChecksEditor
+            checks={request.checks}
+            captures={request.captures}
+            onChecks={(checks) => set({ checks })}
+            onCaptures={(captures) => set({ captures })}
+            onSubmit={onSend}
+            saved={Boolean(saved)}
+          />
+        )}
         {tab === "options" && (
           <div className="form">
             <label>

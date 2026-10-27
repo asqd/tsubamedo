@@ -53,6 +53,9 @@ export function Sidebar({
             <button className="icon" title="Новый запрос (⌘N)" onClick={() => ops.newRequest(selected?.includes("/") ? selected.slice(0, selected.lastIndexOf("/")) : "")}>
               +
             </button>
+            <button className="icon" title="Запустить всю коллекцию: запросы по очереди с проверками" disabled={collection.requests.length === 0} onClick={() => ops.run("")}>
+              ▶
+            </button>
             <button className="icon" title="Перечитать файлы" onClick={onReload}>
               ↻
             </button>

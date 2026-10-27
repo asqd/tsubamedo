@@ -14,6 +14,25 @@ pub struct Request {
     pub auth: Auth,
     pub body: Body,
     pub options: RequestOptions,
+    /// Variables kept from the response for other requests: name → where it is (`$.token`).
+    #[serde(default)]
+    pub captures: Vec<Pair>,
+    /// What the response must be: `status == 200`, `$.items count > 0`.
+    #[serde(default)]
+    pub checks: Vec<Check>,
+}
+
+/// One line of the response checks; see [`crate::checks`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Check {
+    pub text: String,
+    pub enabled: bool,
+}
+
+impl Check {
+    pub fn new(text: impl Into<String>) -> Self {
+        Check { text: text.into(), enabled: true }
+    }
 }
 
 impl Default for Request {
@@ -27,6 +46,8 @@ impl Default for Request {
             auth: Auth::None,
             body: Body::None,
             options: RequestOptions::default(),
+            captures: Vec::new(),
+            checks: Vec::new(),
         }
     }
 }

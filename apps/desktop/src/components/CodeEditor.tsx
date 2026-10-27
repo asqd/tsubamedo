@@ -81,7 +81,7 @@ const varTooltip = hoverTooltip((view, pos) => {
         name.textContent = m[1];
         const value = dom.appendChild(document.createElement("div"));
         value.className = v ? "var-value" : "var-missing";
-        value.textContent = v ? shown(v) || "(пусто)" : "не задана в этом окружении";
+        value.textContent = v ? shown(v) || (v.source.startsWith("из ответа") ? "ещё не получено" : "(пусто)") : "не задана в этом окружении";
         if (v) {
           const source = dom.appendChild(document.createElement("div"));
           source.className = "var-source";

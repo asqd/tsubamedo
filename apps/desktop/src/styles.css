@@ -281,3 +281,32 @@ code { font-family: var(--mono); font-size: 12px; }
 .menu-ask { padding: 6px 10px; max-width: 260px; }
 .menu-ask-row { display: flex; gap: 6px; margin-top: 6px; }
 button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+/* Checks: the editor tab, the results under the response, the collection run. */
+.good-text { color: var(--ok); }
+.section-head { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); margin: 14px 0 6px; }
+.section-head:first-child { margin-top: 2px; }
+.checks-editor .hint { margin: 6px 0 4px; line-height: 1.6; }
+.checks-editor .hint code { background: var(--sunken); padding: 0 3px; border-radius: 3px; }
+.check-problem { color: var(--bad); padding: 2px 4px 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px 29px; }
+.chip { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: var(--sunken); border: 1px solid var(--line); color: var(--muted); }
+.chip:hover { color: var(--accent); border-color: var(--accent); }
+.check-badge { font: 600 12px var(--mono); padding: 2px 8px; border-radius: 6px; border: 0; }
+.check-badge.ok { background: var(--ok-weak); color: var(--ok); }
+.check-badge.bad { background: var(--bad-weak); color: var(--bad); }
+.check-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.check-row > span:first-child { width: 14px; text-align: center; font-weight: 700; }
+.check-why { flex-basis: 100%; padding-left: 22px; white-space: pre-wrap; word-break: break-word; }
+.work { position: relative; }
+.run-panel { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; background: var(--panel); border-top: 1px solid var(--line); }
+.run-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.run-summary { padding: 10px 14px; font-weight: 600; }
+.run-error { margin: 14px; }
+.run-list { flex: 1; padding: 0 8px 12px; }
+.run-row { display: grid; grid-template-columns: 16px 34px minmax(0, 1fr) auto auto; align-items: baseline; gap: 4px 10px; width: 100%; text-align: left; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; }
+.run-row:hover { background: var(--sunken); }
+.run-row > span:first-child { font-weight: 700; text-align: center; }
+.run-row .hist-status { grid-column: auto; }
+.run-row .m { font: 600 10px var(--mono); letter-spacing: .02em; }
+.run-why { grid-column: 3 / -1; white-space: pre-wrap; word-break: break-word; }

@@ -36,6 +36,12 @@ export interface RequestOptions {
   verifyTls: boolean | null;
 }
 
+/** A response check: `status == 200`, `$.items count > 0`. */
+export interface Check {
+  text: string;
+  enabled: boolean;
+}
+
 export interface Request {
   name: string | null;
   method: string;
@@ -45,6 +51,9 @@ export interface Request {
   auth: Auth;
   body: Body;
   options: RequestOptions;
+  /** Variables kept from the response: name → `$.token`, `header Location`… */
+  captures: Pair[];
+  checks: Check[];
 }
 
 export interface RequestItem {
@@ -92,6 +101,43 @@ export interface ResponseMeta {
   contentType: string | null;
   receivedAt: number;
   sent: { method: string; url: string; headers: [string, string][]; bodySize: number };
+  /** Absent in history entries from before checks existed. */
+  checks?: CheckResult[];
+  captures?: Captured[];
+  /** Requests sent first for the values this one needed. */
+  before?: Before[];
+}
+
+export interface CheckResult {
+  check: string;
+  ok: boolean;
+  actual: string | null;
+  error: string | null;
+}
+
+export interface Captured {
+  name: string;
+  value: string | null;
+  error: string | null;
+}
+
+export interface Before {
+  id: string;
+  status: number | null;
+  passed: boolean;
+  failures: string[];
+}
+
+export interface RunResult {
+  id: string;
+  method: string;
+  status: number | null;
+  totalMs: number | null;
+  size: number | null;
+  passed: boolean;
+  failures: string[];
+  checks: number;
+  checksPassed: number;
 }
 
 export interface ViewInfo {
@@ -205,6 +251,11 @@ export const api = {
   bodyText: (responseId: number, viewId: number | null) => call<string>("bodyText", { responseId, viewId }),
   saveBody: (responseId: number, viewId: number | null, path: string) =>
     call<null>("saveBody", { responseId, viewId, path }),
+  /** The collection (`folder` empty) or a folder of it, each request after those it takes values from. */
+  runCollection: (sendId: string, folder: string, env: string | null) =>
+    call<{ results: RunResult[]; totalMs: number }>("runCollection", { sendId, folder, env }),
+  /** Why a check line is not understood, or null. */
+  validateCheck: (text: string) => call<string | null>("validateCheck", { text }),
 };
 
 export const emptyRequest = (): Request => ({
@@ -216,4 +267,6 @@ export const emptyRequest = (): Request => ({
   auth: { type: "none" },
   body: { type: "none" },
   options: { followRedirects: null, timeoutMs: null, verifyTls: null },
+  captures: [],
+  checks: [],
 });

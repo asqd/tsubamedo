@@ -15,8 +15,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::task::AbortHandle;
-use tsubamedo_core::collection::Collection;
-use tsubamedo_core::http::{self, Redirect, Response, ResponseBody, SendOptions, Timings, TlsInfo};
+use tsubamedo_core::checks::{CheckResult, Captured};
+use tsubamedo_core::collection::{Collection, VarSource};
+use tsubamedo_core::run::{self, Exchange, Runner};
+use tsubamedo_core::http::{Redirect, Response, ResponseBody, SendOptions, Timings, TlsInfo};
 use tsubamedo_core::organize;
 use tsubamedo_core::prepare::prepare;
 use tsubamedo_core::request_file::RequestFile;
@@ -45,6 +47,8 @@ struct State {
     views: HashMap<u64, (u64, Arc<TextView>)>,
     /// `(response, pretty)` → view, so switching modes back and forth costs nothing.
     view_of: HashMap<(u64, bool), u64>,
+    /// Values captured from responses for this collection, by environment.
+    captured: history::CapturedStore,
     next_id: u64,
 }
 
@@ -132,7 +136,11 @@ impl Session {
 
     /// A session keeping history in `data_dir` (the app's data folder).
     pub fn with_data_dir(data_dir: PathBuf) -> Arc<Self> {
-        Arc::new(Session { data_dir: Some(data_dir), ..Session::default() })
+        let session = Session { data_dir: Some(data_dir), ..Session::default() };
+        if let Some(history) = session.history() {
+            session.state.lock().unwrap().captured = history.captured();
+        }
+        Arc::new(session)
     }
 
     fn history(&self) -> Option<history::History> {
@@ -152,6 +160,11 @@ impl Session {
             "saveRequest" => self.save_request(args(a)?),
             "createRequest" => self.create_request(args(a)?),
             "send" => self.send(args(a)?).await,
+            "runCollection" => self.run_collection(args(a)?).await,
+            "validateCheck" => Ok(match tsubamedo_core::checks::validate(&args::<TextArg>(a)?.text) {
+                Ok(()) => Value::Null,
+                Err(e) => Value::String(e),
+            }),
             "cancel" => {
                 if let Some(handle) = self.sends.lock().unwrap().remove(&args::<SendIdArg>(a)?.send_id) {
                     handle.abort();
@@ -210,6 +223,7 @@ impl Session {
                 if let Some(h) = self.history() {
                     h.clear().map_err(|e| e.to_string())?;
                 }
+                self.state.lock().unwrap().captured.clear();
                 Ok(Value::Null)
             }
             other => Err(format!("неизвестная команда {other}")),
@@ -220,7 +234,10 @@ impl Session {
         let path = PathBuf::from(path);
         let collection = Collection::open(&path).map_err(|e| e.to_string())?;
         let info = collection_info(&collection);
-        self.state.lock().unwrap().collection = Some(collection);
+        let captured = self.data_dir.as_ref().map(|data| history::History::open(data, Some(&collection.root)).captured());
+        let mut state = self.state.lock().unwrap();
+        state.collection = Some(collection);
+        state.captured = captured.unwrap_or_default();
         reply(info)
     }
 
@@ -323,16 +340,16 @@ impl Session {
         }))
     }
 
-    fn record(&self, a: &SendArg, outcome: Result<(&ResponseMeta, &ResponseBody), &str>) {
+    fn record(&self, request_id: Option<&str>, env: Option<&str>, request: &Request, outcome: Result<(&ResponseMeta, &ResponseBody), &str>) {
         let Some(history) = self.history() else { return };
         let at = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
         let id = format!("{at}-{}", self.state.lock().unwrap().id());
         let mut entry = history::Entry {
             id,
             at,
-            request_id: a.id.clone(),
-            env: a.env.clone(),
-            request: a.request.clone(),
+            request_id: request_id.map(str::to_string),
+            env: env.map(str::to_string),
+            request: request.clone(),
             status: None,
             error: None,
             total_ms: None,
@@ -363,12 +380,70 @@ impl Session {
         let _ = history.add(&entry, body_bytes.as_deref());
     }
 
+    /// An exchange into history; a request stopped before sending (a missing variable) is not.
+    fn record_exchange(&self, ex: &Exchange, env: Option<&str>, meta: Option<&ResponseMeta>) {
+        match (&ex.result, meta) {
+            (Ok(response), Some(meta)) => self.record(ex.id.as_deref(), env, &ex.request, Ok((meta, &response.body))),
+            (Ok(response), None) => {
+                let meta = ResponseMeta::new(0, response, ex);
+                self.record(ex.id.as_deref(), env, &ex.request, Ok((&meta, &response.body)));
+            }
+            (Err(e), _) if ex.sent.is_some() => self.record(ex.id.as_deref(), env, &ex.request, Err(&e.to_string())),
+            _ => {}
+        }
+    }
+
+    /// A runner over the open collection with what earlier responses captured.
+    fn runner(&self, env: Option<&str>, insecure: bool) -> Result<Runner, String> {
+        let state = self.state.lock().unwrap();
+        let captured: Vars =
+            state.captured.get(env.unwrap_or_default()).map(|m| m.iter().map(|(k, v)| (k.clone(), v.value.clone())).collect()).unwrap_or_default();
+        let options = SendOptions { verify_tls: !insecure, ..SendOptions::default() };
+        Runner::new(state.collection.as_ref(), env, Vars::new(), captured, options).map_err(|e| e.to_string())
+    }
+
+    /// Keeps what the exchanges captured, for the next sends and the next start.
+    fn keep_captured(&self, env: Option<&str>, exchanges: &[Exchange]) {
+        let mut state = self.state.lock().unwrap();
+        let store = state.captured.entry(env.unwrap_or_default().to_string()).or_default();
+        let mut changed = false;
+        for ex in exchanges {
+            for c in &ex.captures {
+                if let Some(value) = &c.value {
+                    let from = ex.id.clone().unwrap_or_else(|| "черновик".into());
+                    changed |= store.insert(c.name.clone(), history::CapturedValue { value: value.clone(), from }).is_none_or(|old| old.value != *value);
+                }
+            }
+        }
+        let store = state.captured.clone();
+        drop(state);
+        if changed && let Some(history) = self.history() {
+            let _ = history.save_captured(&store);
+        }
+    }
+
+    /// Variables for hints in the editor: from the files, then those captured from responses
+    /// (they win), then those a request will capture when it is sent.
     fn vars(&self, env: Option<String>) -> Reply {
         let state = self.state.lock().unwrap();
-        match &state.collection {
-            Some(c) => reply(c.var_sources(env.as_deref()).map_err(|e| e.to_string())?),
-            None => Ok(json!([])),
+        let mut list = match &state.collection {
+            Some(c) => c.var_sources(env.as_deref()).map_err(|e| e.to_string())?,
+            None => Vec::new(),
+        };
+        if let Some(captured) = state.captured.get(env.as_deref().unwrap_or_default()) {
+            for (name, v) in captured {
+                list.retain(|x| x.name != *name);
+                list.push(VarSource { name: name.clone(), value: v.value.clone(), source: format!("из ответа «{}»", v.from), secret: false });
+            }
         }
+        if let Some(c) = &state.collection {
+            for (name, source) in run::producers(c) {
+                if !list.iter().any(|x| x.name == name) {
+                    list.push(VarSource { name, value: String::new(), source: format!("из ответа «{}», придёт при отправке", source.id), secret: false });
+                }
+            }
+        }
+        reply(list)
     }
 
     /// Variables and the folder for relative paths of a request about to be sent.
@@ -390,39 +465,89 @@ impl Session {
         Ok(Value::String(tsubamedo_core::curl::to_curl(&prepared, &a.request.body, &vars)))
     }
 
+    /// Sends the request, first those whose captured values it needs and does not have yet.
     async fn send(self: Arc<Self>, a: SendArg) -> Reply {
-        let (prepared, options) = {
-            let (vars, dir) = self.context(a.id.as_deref(), a.env.as_deref())?;
-            let prepared = prepare(&a.request, &vars, &dir).map_err(|e| e.to_string())?;
-            let defaults = SendOptions { verify_tls: !a.insecure, ..SendOptions::default() };
-            let options = defaults.for_request(&prepared);
-            (prepared, options)
-        };
-        let sent = SentRequest {
-            method: prepared.method.clone(),
-            url: prepared.url.to_string(),
-            headers: prepared.headers.clone(),
-            body_size: prepared.body.len() as u64,
-        };
-        let task = tokio::spawn(async move { http::send(&prepared, &options).await });
+        let mut runner = self.runner(a.env.as_deref(), a.insecure)?;
+        let (_, dir) = self.context(a.id.as_deref(), a.env.as_deref())?;
+        let (id, request) = (a.id.clone(), a.request.clone());
+        let task = tokio::spawn(async move { runner.send(id.as_deref(), &request, &dir).await });
         self.sends.lock().unwrap().insert(a.send_id.clone(), task.abort_handle());
         let result = task.await;
         self.sends.lock().unwrap().remove(&a.send_id);
-        let response = match result {
-            Ok(Ok(r)) => r,
-            Ok(Err(e)) => {
-                let message = e.to_string();
-                self.record(&a, Err(&message));
-                return Err(message);
-            }
+        let mut exchanges = match result {
+            Ok(exchanges) => exchanges,
             Err(e) if e.is_cancelled() => return Err("Отменено".into()),
             Err(e) => return Err(e.to_string()),
         };
-
+        self.keep_captured(a.env.as_deref(), &exchanges);
+        let last = exchanges.pop().expect("the request itself is always there");
+        for ex in &exchanges {
+            self.record_exchange(ex, a.env.as_deref(), None);
+        }
+        let before: Vec<Before> = exchanges.iter().map(Before::of).collect();
+        let response = match &last.result {
+            Ok(response) => response,
+            Err(e) => {
+                self.record_exchange(&last, a.env.as_deref(), None);
+                let mut message = e.to_string();
+                for b in before.iter().filter(|b| !b.passed) {
+                    message.push_str(&format!("\nСначала отправлен «{}»: {}", b.id, b.failures.join("; ")));
+                }
+                return Err(message);
+            }
+        };
         let id = self.state.lock().unwrap().keep_body(response.body.clone());
-        let meta = ResponseMeta::new(id, &response, sent);
-        self.record(&a, Ok((&meta, &response.body)));
+        let mut meta = ResponseMeta::new(id, response, &last);
+        meta.before = before;
+        self.record_exchange(&last, a.env.as_deref(), Some(&meta));
         reply(meta)
+    }
+
+    /// Runs the collection or one folder of it, each request after those it takes values from.
+    async fn run_collection(self: Arc<Self>, a: RunArg) -> Reply {
+        let mut runner = self.runner(a.env.as_deref(), a.insecure)?;
+        let plan: Vec<(String, Request, PathBuf)> = {
+            let state = self.state.lock().unwrap();
+            let collection = state.collection()?;
+            let inside = |id: &str| a.folder.as_deref().is_none_or(|f| f.is_empty() || id.starts_with(&format!("{f}/")));
+            runner.order(collection, |e| inside(&e.id)).into_iter().map(|e| (e.id.clone(), e.request.clone(), e.dir().to_path_buf())).collect()
+        };
+        let started = std::time::Instant::now();
+        let task = tokio::spawn(async move {
+            let mut all = Vec::new();
+            for (id, request, dir) in plan {
+                all.extend(runner.send(Some(&id), &request, &dir).await);
+            }
+            all
+        });
+        self.sends.lock().unwrap().insert(a.send_id.clone(), task.abort_handle());
+        let result = task.await;
+        self.sends.lock().unwrap().remove(&a.send_id);
+        let exchanges = match result {
+            Ok(exchanges) => exchanges,
+            Err(e) if e.is_cancelled() => return Err("Отменено".into()),
+            Err(e) => return Err(e.to_string()),
+        };
+        self.keep_captured(a.env.as_deref(), &exchanges);
+        let results: Vec<Value> = exchanges
+            .iter()
+            .map(|ex| {
+                self.record_exchange(ex, a.env.as_deref(), None);
+                let response = ex.result.as_ref().ok();
+                json!({
+                    "id": ex.id,
+                    "method": ex.request.method.to_ascii_uppercase(),
+                    "status": response.map(|r| r.status),
+                    "totalMs": response.map(|r| r.timings.total.as_secs_f64() * 1000.0),
+                    "size": response.map(|r| r.body.len()),
+                    "passed": ex.passed(),
+                    "failures": ex.failures(),
+                    "checks": ex.checks.len(),
+                    "checksPassed": ex.checks.iter().filter(|c| c.ok).count(),
+                })
+            })
+            .collect();
+        Ok(json!({ "results": results, "totalMs": started.elapsed().as_secs_f64() * 1000.0 }))
     }
 
     async fn view(self: Arc<Self>, a: ViewArg) -> Reply {
@@ -685,6 +810,17 @@ struct ViewArg {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunArg {
+    send_id: String,
+    /// A folder of the collection; the whole collection when empty.
+    folder: Option<String>,
+    env: Option<String>,
+    #[serde(default)]
+    insecure: bool,
+}
+
+#[derive(Deserialize)]
 struct RetainArg {
     responses: Vec<u64>,
     seen: u64,
@@ -778,10 +914,38 @@ struct ResponseMeta {
     /// Unix milliseconds.
     received_at: u64,
     sent: SentRequest,
+    checks: Vec<CheckResult>,
+    captures: Vec<Captured>,
+    /// Requests sent first for the values this one needed.
+    before: Vec<Before>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Before {
+    id: String,
+    status: Option<u16>,
+    passed: bool,
+    failures: Vec<String>,
+}
+
+impl Before {
+    fn of(ex: &Exchange) -> Self {
+        Before {
+            id: ex.id.clone().unwrap_or_default(),
+            status: ex.result.as_ref().ok().map(|r| r.status),
+            passed: ex.passed(),
+            failures: ex.failures(),
+        }
+    }
 }
 
 impl ResponseMeta {
-    fn new(id: u64, r: &Response, sent: SentRequest) -> Self {
+    fn new(id: u64, r: &Response, ex: &Exchange) -> Self {
+        let sent = match &ex.sent {
+            Some(p) => SentRequest { method: p.method.clone(), url: p.url.to_string(), headers: p.headers.clone(), body_size: p.body.len() as u64 },
+            None => SentRequest { method: String::new(), url: String::new(), headers: Vec::new(), body_size: 0 },
+        };
         let sniffed_json = r.body.head(64).is_ok_and(|head| {
             let text = head.trim_ascii_start();
             text.starts_with(b"{") || text.starts_with(b"[")
@@ -803,6 +967,9 @@ impl ResponseMeta {
             content_type: r.header("content-type").map(str::to_string),
             received_at: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64),
             sent,
+            checks: ex.checks.clone(),
+            captures: ex.captures.clone(),
+            before: Vec::new(),
         }
     }
 }

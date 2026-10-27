@@ -1,5 +1,6 @@
 //! From a request with `{{variables}}` to exactly what goes on the wire.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
@@ -104,6 +105,37 @@ pub fn prepare(request: &Request, vars: &Vars, base_dir: &Path) -> Result<Prepar
         return Err(Error::Invalid(format!("неверный метод «{method}»")));
     }
     Ok(Prepared { method, url, headers, body, options: request.options.clone() })
+}
+
+/// Variables a request refers to, with those inside the values of other variables: what it
+/// needs from other requests' responses.
+pub fn variables(request: &Request, vars: &Vars) -> BTreeSet<String> {
+    let mut r = Renderer::new(vars);
+    let mut texts: Vec<&str> = vec![&request.method, &request.url];
+    fn pairs(list: &[Pair]) -> impl Iterator<Item = &str> {
+        list.iter().filter(|p| p.enabled).flat_map(|p| [p.name.as_str(), p.value.as_str()])
+    }
+    texts.extend(pairs(&request.query));
+    texts.extend(pairs(&request.headers));
+    match &request.auth {
+        Auth::None => {}
+        Auth::Basic { username, password } => texts.extend([username.as_str(), password]),
+        Auth::Bearer { token } => texts.push(token),
+        Auth::ApiKey { key, value, .. } => texts.extend([key.as_str(), value]),
+    }
+    match &request.body {
+        Body::None => {}
+        Body::Json { content } => texts.push(content),
+        Body::Text { content, content_type } => texts.extend([Some(content.as_str()), content_type.as_deref()].into_iter().flatten()),
+        Body::Form { fields } => texts.extend(pairs(fields)),
+        Body::Multipart { parts } => texts.extend(parts.iter().filter(|p| p.enabled).flat_map(|p| [p.name.as_str(), p.value.as_str()])),
+        Body::File { path, content_type } => texts.extend([Some(path.as_str()), content_type.as_deref()].into_iter().flatten()),
+    }
+    texts.extend(request.checks.iter().filter(|c| c.enabled).map(|c| c.text.as_str()));
+    for text in texts {
+        r.render(text);
+    }
+    r.used().clone()
 }
 
 /// Like the address bar: `example.com/x` means `http://example.com/x`.

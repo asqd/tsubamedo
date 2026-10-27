@@ -15,17 +15,23 @@ pub type Vars = BTreeMap<String, String>;
 pub struct Renderer<'a> {
     vars: &'a Vars,
     missing: BTreeSet<String>,
+    /// Every variable met, defined or not, with those inside other variables' values.
+    used: BTreeSet<String>,
     cycle: Option<String>,
 }
 
 impl<'a> Renderer<'a> {
     pub fn new(vars: &'a Vars) -> Self {
-        Renderer { vars, missing: BTreeSet::new(), cycle: None }
+        Renderer { vars, missing: BTreeSet::new(), used: BTreeSet::new(), cycle: None }
     }
 
     /// Undefined variables are left as written and remembered for [`Renderer::finish`].
     pub fn render(&mut self, input: &str) -> String {
         self.expand(input, &mut Vec::new())
+    }
+
+    pub fn used(&self) -> &BTreeSet<String> {
+        &self.used
     }
 
     pub fn finish(self) -> Result<()> {
@@ -71,6 +77,7 @@ impl<'a> Renderer<'a> {
             }
             return value;
         }
+        self.used.insert(name.to_string());
         if stack.iter().any(|n| n == name) {
             self.cycle.get_or_insert_with(|| name.to_string());
             return Some(String::new());

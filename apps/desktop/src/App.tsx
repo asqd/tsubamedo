@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, CollectionInfo, emptyRequest, Reorganized, Request } from "./api";
 import { Logo } from "./components/Logo";
 import { RequestEditor } from "./components/RequestEditor";
+import { RunPanel, RunState } from "./components/RunPanel";
 import { ResponsePane } from "./components/ResponsePane";
 import { Kind, TreeOps } from "./components/RequestTree";
 import { Sidebar } from "./components/Sidebar";
@@ -59,6 +60,7 @@ export default function App() {
   const [split, setSplit] = useState(() => Number(store.get("split")) || 0.46);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [renameTarget, setRenameTarget] = useState<{ kind: Kind; path: string; n: number } | null>(null);
+  const [run, setRun] = useState<RunState | null>(null);
 
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
@@ -269,13 +271,33 @@ export default function App() {
     try {
       const meta = await api.send(sendId, current.id, current.request, env, false);
       patchTab(current.key, { response: meta, sendId: null });
-      setHistoryVersion((v) => v + 1);
     } catch (e) {
       const message = (e as Error).message;
       patchTab(current.key, { sendId: null, error: message === "Отменено" ? null : message });
-      setHistoryVersion((v) => v + 1);
     }
-  }, [active, flushSave, patchTab, env]);
+    setHistoryVersion((v) => v + 1);
+    // Values captured from the response (or those sent first) are variables now.
+    loadVars();
+  }, [active, flushSave, patchTab, env, loadVars]);
+
+  /** Runs the collection (`folder` empty) or a folder in the panel over the editors. */
+  const startRun = useCallback(
+    async (folder: string) => {
+      await flushSave();
+      const sendId = crypto.randomUUID();
+      setRun({ folder, sendId, results: null, totalMs: null, error: null });
+      const done = (patch: Partial<RunState>) => setRun((cur) => (cur?.sendId === sendId ? { ...cur, ...patch } : cur));
+      try {
+        const { results, totalMs } = await api.runCollection(sendId, folder, env);
+        done({ results, totalMs });
+      } catch (e) {
+        done({ error: (e as Error).message });
+      }
+      setHistoryVersion((v) => v + 1);
+      loadVars();
+    },
+    [flushSave, env, loadVars],
+  );
 
   const pasteCurl = (text: string): boolean => {
     if (!/^\s*curl\s/.test(text)) return false;
@@ -344,6 +366,7 @@ export default function App() {
   };
 
   const ops: TreeOps = {
+    run: startRun,
     newRequest: async (folder) =>
       guarded(async () => {
         const { id, collection: info } = await api.createRequest(folder, "Новый запрос");
@@ -548,6 +571,22 @@ export default function App() {
           <div className="workspace">
             <TabBar tabs={tabs} active={tab.key} onSelect={activate} onClose={closeTab} onNew={newScratch} />
             <div className="work">
+              {run && (
+                <RunPanel
+                  run={run}
+                  env={env}
+                  onOpen={(id) => {
+                    setRun(null);
+                    openRequest(id);
+                  }}
+                  onAgain={() => startRun(run.folder)}
+                  onCancel={() => api.cancel(run.sendId)}
+                  onClose={() => {
+                    if (run.results === null && run.error === null) api.cancel(run.sendId);
+                    setRun(null);
+                  }}
+                />
+              )}
               <section className="left" style={{ width: `${split * 100}%` }}>
                 <RequestEditor
                   key={tab.key}

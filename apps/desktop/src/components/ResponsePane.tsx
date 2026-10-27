@@ -4,7 +4,7 @@ import { ResponseMeta } from "../api";
 import { ms, size, statusTone } from "../format";
 import { BodyViewer } from "./BodyViewer";
 
-type Tab = "body" | "headers" | "time" | "sent";
+type Tab = "body" | "checks" | "headers" | "time" | "sent";
 
 export function ResponsePane({
   meta,
@@ -45,6 +45,11 @@ export function ResponsePane({
   }
 
   const compressed = meta.wireSize !== meta.size && meta.wireSize > 0;
+  const checks = meta.checks ?? [];
+  const captures = meta.captures ?? [];
+  const before = meta.before ?? [];
+  const failed = checks.filter((c) => !c.ok).length + captures.filter((c) => c.error).length + before.filter((b) => !b.passed).length;
+  const hasChecks = checks.length + captures.length + before.length > 0;
   return (
     <div className="response">
       <div className="status-line">
@@ -64,11 +69,17 @@ export function ResponsePane({
             {meta.redirects.length} перенаправл.
           </span>
         )}
+        {checks.length > 0 && (
+          <button className={`check-badge ${failed ? "bad" : "ok"}`} onClick={() => setTab("checks")} title="Проверки ответа">
+            {failed ? "✗" : "✓"} {checks.filter((c) => c.ok).length}/{checks.length}
+          </button>
+        )}
       </div>
       <div className="tabs">
         {(
           [
             ["body", "Тело"],
+            ...(hasChecks ? [["checks", failed ? `Проверки ✗${failed}` : "Проверки"]] : []),
             ["headers", `Заголовки ${meta.headers.length}`],
             ["time", "Время"],
             ["sent", "Отправлено"],
@@ -81,6 +92,7 @@ export function ResponsePane({
       </div>
       <div className="tab-body">
         {tab === "body" && <BodyViewer key={meta.responseId} meta={meta} />}
+        {tab === "checks" && <ChecksResult meta={meta} />}
         {tab === "headers" && <HeaderTable headers={meta.headers} />}
         {tab === "time" && <TimingChart meta={meta} />}
         {tab === "sent" && (
@@ -96,6 +108,56 @@ export function ResponsePane({
     </div>
   );
 }
+
+/** Requests sent first, the checks with what came, and the values kept for other requests. */
+function ChecksResult({ meta }: { meta: ResponseMeta }) {
+  const before = meta.before ?? [];
+  const checks = meta.checks ?? [];
+  const captures = meta.captures ?? [];
+  return (
+    <div className="scroll pad check-results">
+      {before.length > 0 && (
+        <>
+          <div className="section-head">Сначала отправлены — за значениями для этого запроса</div>
+          {before.map((b, i) => (
+            <div key={i} className="check-row">
+              <span className={b.passed ? "good-text" : "bad-text"}>{b.passed ? "✓" : "✗"}</span>
+              <span className="mono">{b.id}</span>
+              {b.status != null && <span className={`hist-status ${statusTone(b.status)}`}>{b.status}</span>}
+              {b.failures.map((f, j) => (
+                <div key={j} className="check-why bad-text small">
+                  {f}
+                </div>
+              ))}
+            </div>
+          ))}
+        </>
+      )}
+      {checks.length > 0 && <div className="section-head">Проверки</div>}
+      {checks.map((c, i) => (
+        <div key={i} className="check-row">
+          <span className={c.ok ? "good-text" : "bad-text"}>{c.ok ? "✓" : "✗"}</span>
+          <span className="mono sel">{c.check}</span>
+          {(c.error || c.actual != null) && (
+            <div className={`check-why small ${c.ok ? "faint" : "bad-text"}`}>
+              {c.error ?? (c.ok ? c.actual : `пришло ${c.actual}`)}
+            </div>
+          )}
+        </div>
+      ))}
+      {captures.length > 0 && <div className="section-head">Значения из ответа</div>}
+      {captures.map((c, i) => (
+        <div key={i} className="check-row">
+          <span className={c.error ? "bad-text" : "good-text"}>{c.error ? "✗" : "→"}</span>
+          <span className="mono">{`{{${c.name}}}`}</span>
+          <div className={`check-why small mono sel ${c.error ? "bad-text" : "faint"}`}>{c.error ?? short(c.value ?? "")}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const short = (text: string) => (text.length > 300 ? `${text.slice(0, 300)}…` : text);
 
 function HeaderTable({ headers }: { headers: [string, string][] }) {
   return (

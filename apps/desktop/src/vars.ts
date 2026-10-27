@@ -6,7 +6,7 @@ import { Request } from "./api";
 export interface VarInfo {
   name: string;
   value: string;
-  /** «коллекция», «окружение stage», «stage, секрет»… */
+  /** «коллекция», «окружение stage», «stage, секрет», «из ответа «auth/login»»… */
   source: string;
   /** From a *.local.toml file: shown masked. */
   secret: boolean;
@@ -54,6 +54,7 @@ export function missingVars(request: Request, vars: VarInfo[]): string[] {
   if (b.type === "form") for (const f of b.fields) if (f.enabled) texts.push(f.name, f.value);
   if (b.type === "multipart") for (const p of b.parts) if (p.enabled) texts.push(p.name, p.value);
   if (b.type === "file") texts.push(b.path);
+  for (const c of request.checks ?? []) if (c.enabled) texts.push(c.text);
 
   const missing = new Set<string>();
   const seen = new Set<string>();

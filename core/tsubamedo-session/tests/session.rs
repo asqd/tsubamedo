@@ -108,3 +108,98 @@ async fn edit_send_and_view_a_big_json() {
     call(&s, "clearHistory", json!({})).await;
     assert_eq!(call(&s, "history", json!({})).await, json!([]));
 }
+
+/// `/login` gives out a token; `/orders` answers only with it, and counts the logins.
+async fn shop() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let logins = Arc::new(AtomicUsize::new(0));
+    let counter = logins.clone();
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let counter = counter.clone();
+            tokio::spawn(async move {
+                let mut buf = vec![0; 8192];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let (status, body) = if path == "/login" {
+                    let n = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                    ("200 OK", format!(r#"{{"token":"t-{n}"}}"#))
+                } else if head.to_ascii_lowercase().contains("authorization: bearer t-") {
+                    ("200 OK", r#"{"items":[{"id":1},{"id":2}]}"#.to_string())
+                } else {
+                    ("401 Unauthorized", r#"{"error":"нужен токен"}"#.to_string())
+                };
+                let head = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = stream.write_all(head.as_bytes()).await;
+                let _ = stream.write_all(body.as_bytes()).await;
+            });
+        }
+    });
+    (format!("http://{addr}"), logins)
+}
+
+#[tokio::test]
+async fn chains_checks_and_collection_runs() {
+    use std::sync::atomic::Ordering;
+    let (base, logins) = shop().await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("tsubamedo.toml"), format!("name = \"Магазин\"\n[vars]\nbase = \"{base}\"\n")).unwrap();
+    std::fs::create_dir_all(root.join("auth")).unwrap();
+    std::fs::create_dir_all(root.join("orders")).unwrap();
+    std::fs::write(root.join("auth/login.toml"), "method = \"POST\"\nurl = \"{{base}}/login\"\nchecks = ['status == 200']\n\n[capture]\ntoken = '$.token'\n").unwrap();
+    let orders = "url = \"{{base}}/orders\"\nchecks = [\n  'status == 200',\n  '$.items count == 2',\n  '$.items[0].id == 1',\n]\n\n[auth]\ntype = \"bearer\"\ntoken = \"{{token}}\"\n";
+    std::fs::write(root.join("orders/list.toml"), orders).unwrap();
+    std::fs::write(root.join("orders/created.toml"), orders.replace("'status == 200'", "'status == 201'")).unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let s = Session::with_data_dir(data.path().to_path_buf());
+    call(&s, "openCollection", json!({ "path": root })).await;
+
+    // Before anything is captured, the variable is promised by the request that captures it.
+    let vars = call(&s, "vars", json!({ "env": null })).await;
+    assert!(vars.as_array().unwrap().iter().any(|v| v["name"] == "token" && v["source"] == "из ответа «auth/login», придёт при отправке"), "{vars}");
+
+    // `token` is not set: login goes first, then the request with its checks.
+    let request = call(&s, "getRequest", json!({ "id": "orders/list" })).await;
+    assert_eq!(request["checks"][1], json!({ "text": "$.items count == 2", "enabled": true }));
+    let meta = call(&s, "send", json!({ "sendId": "1", "id": "orders/list", "request": request, "env": null })).await;
+    assert_eq!(meta["status"], json!(200));
+    assert_eq!(meta["before"], json!([{ "id": "auth/login", "status": 200, "passed": true, "failures": [] }]));
+    assert!(meta["checks"].as_array().unwrap().iter().all(|c| c["ok"] == json!(true)), "{}", meta["checks"]);
+    // Now it is, so the next send does not log in again.
+    let meta = call(&s, "send", json!({ "sendId": "2", "id": "orders/list", "request": request, "env": null })).await;
+    assert_eq!(meta["before"], json!([]));
+    assert_eq!(logins.load(Ordering::SeqCst), 1);
+    let vars = call(&s, "vars", json!({ "env": null })).await;
+    assert!(vars.as_array().unwrap().iter().any(|v| v["name"] == "token" && v["value"] == "t-1" && v["source"] == "из ответа «auth/login»"), "{vars}");
+    // Both went to history, login too.
+    assert_eq!(call(&s, "history", json!({ "requestId": "auth/login" })).await.as_array().unwrap().len(), 1);
+
+    // A failing check says what came.
+    let created = call(&s, "getRequest", json!({ "id": "orders/created" })).await;
+    let meta = call(&s, "send", json!({ "sendId": "3", "id": "orders/created", "request": created, "env": null })).await;
+    assert_eq!(meta["checks"][0], json!({ "check": "status == 201", "ok": false, "actual": "200", "error": null }));
+
+    // Captured values survive a restart.
+    let again = Session::with_data_dir(data.path().to_path_buf());
+    call(&again, "openCollection", json!({ "path": root })).await;
+    let vars = call(&again, "vars", json!({ "env": null })).await;
+    assert!(vars.as_array().unwrap().iter().any(|v| v["name"] == "token" && v["value"] == "t-1"), "{vars}");
+
+    // A folder run brings in login although it is outside the folder… once the token is gone.
+    call(&again, "clearHistory", json!({})).await;
+    let run = call(&again, "runCollection", json!({ "sendId": "r", "folder": "orders", "env": null })).await;
+    let ids: Vec<&str> = run["results"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["auth/login", "orders/created", "orders/list"]);
+    let passed: Vec<bool> = run["results"].as_array().unwrap().iter().map(|r| r["passed"].as_bool().unwrap()).collect();
+    assert_eq!(passed, [true, false, true]);
+    assert_eq!(run["results"][1]["failures"], json!(["status == 201 — пришло 200"]));
+    assert_eq!(logins.load(Ordering::SeqCst), 2);
+
+    assert_eq!(call(&s, "validateCheck", json!({ "text": "$.id == {{id}}" })).await, Value::Null);
+    assert!(call(&s, "validateCheck", json!({ "text": "status" })).await.is_string());
+}

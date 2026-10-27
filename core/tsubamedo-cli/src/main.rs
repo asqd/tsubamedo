@@ -9,10 +9,13 @@ use std::time::{Duration, Instant};
 
 use clap::{Args, Parser, Subcommand};
 use tsubamedo_core::collection::{Collection, MANIFEST};
-use tsubamedo_core::http::{Response, SendOptions, send};
+use tsubamedo_core::http::{Response, SendOptions};
 use tsubamedo_core::prepare::prepare;
 use tsubamedo_core::request_file::RequestFile;
+use tsubamedo_core::run::{Exchange, Runner};
 use tsubamedo_core::{Body, Error, Pair, Request, Vars};
+
+mod junit;
 
 use format::{Paint, duration, size};
 
@@ -27,7 +30,7 @@ struct Cli {
 enum Command {
     /// Отправить один запрос: адрес, файл запроса или его имя в коллекции.
     Send(SendArgs),
-    /// Отправить все запросы коллекции по порядку.
+    /// Отправить запросы коллекции: каждый после тех, чьи значения он берёт, с проверками.
     Run(RunArgs),
     /// Проверить, что файлы читаются и все переменные заданы.
     Check(CheckArgs),
@@ -85,7 +88,7 @@ struct SendArgs {
     /// Тело как пришло, без форматирования JSON.
     #[arg(long)]
     raw: bool,
-    /// Код выхода 1, если статус ответа 400 и выше.
+    /// Код выхода 1, если статус ответа 400 и выше (проверки из файла запроса — всегда).
     #[arg(short, long)]
     fail: bool,
 }
@@ -105,6 +108,9 @@ struct RunArgs {
     /// Остановиться на первой ошибке.
     #[arg(long)]
     bail: bool,
+    /// Записать отчёт JUnit XML для CI (GitLab, Jenkins, GitHub Actions).
+    #[arg(long, value_name = "ФАЙЛ")]
+    junit: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -156,29 +162,36 @@ fn overrides(common: &Common) -> Vars {
     common.vars.iter().cloned().collect()
 }
 
-/// What `send` was pointed at: the request, the folder for its relative paths, and variables.
-fn resolve_target(args: &SendArgs) -> tsubamedo_core::Result<(Request, PathBuf, Vars)> {
+/// What `send` was pointed at: the request, its collection and id there, and the folder for
+/// its relative paths.
+struct Target {
+    request: Request,
+    collection: Option<Collection>,
+    id: Option<String>,
+    dir: PathBuf,
+}
+
+fn resolve_target(args: &SendArgs) -> tsubamedo_core::Result<Target> {
     let target = Path::new(&args.target);
     let cwd = std::env::current_dir().map_err(|e| Error::io(".", e))?;
     let from_file = target.is_file() && target.extension().is_some_and(|e| e == "toml");
     let root = Collection::find_root(if from_file { target } else { &cwd });
     let collection = root.map(Collection::open).transpose()?;
-    let vars = match &collection {
-        Some(c) => c.vars(args.common.env.as_deref(), &overrides(&args.common))?,
-        None if args.common.env.is_some() => {
-            return Err(Error::Invalid(format!("окружение задано, но {MANIFEST} не найден ни здесь, ни выше")));
-        }
-        None => overrides(&args.common),
-    };
+    if collection.is_none() && args.common.env.is_some() {
+        return Err(Error::Invalid(format!("окружение задано, но {MANIFEST} не найден ни здесь, ни выше")));
+    }
     if from_file {
         let request = RequestFile::open(target)?.request()?;
         let dir = target.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
-        return Ok((request, dir, vars));
+        let file = target.canonicalize().ok();
+        let id = collection.as_ref().and_then(|c| c.requests.iter().find(|e| e.path.canonicalize().ok() == file)).map(|e| e.id.clone());
+        return Ok(Target { request, collection, id, dir });
     }
     if let Some(entry) = collection.as_ref().and_then(|c| c.find(args.target.trim_end_matches(".toml"))) {
-        return Ok((entry.request.clone(), entry.dir().to_path_buf(), vars));
+        let (request, id, dir) = (entry.request.clone(), Some(entry.id.clone()), entry.dir().to_path_buf());
+        return Ok(Target { request, collection, id, dir });
     }
-    Ok((Request { url: args.target.clone(), ..Request::default() }, cwd, vars))
+    Ok(Target { request: Request { url: args.target.clone(), ..Request::default() }, collection, id: None, dir: cwd })
 }
 
 fn data_arg(value: &str) -> io::Result<String> {
@@ -194,7 +207,7 @@ fn data_arg(value: &str) -> io::Result<String> {
 }
 
 async fn send_one(args: SendArgs) -> tsubamedo_core::Result<ExitCode> {
-    let (mut request, dir, vars) = resolve_target(&args)?;
+    let Target { mut request, collection, id, dir } = resolve_target(&args)?;
     for header in &args.headers {
         let (name, value) = header
             .split_once(':')
@@ -217,15 +230,47 @@ async fn send_one(args: SendArgs) -> tsubamedo_core::Result<ExitCode> {
         request.options.follow_redirects = Some(false);
     }
 
-    let prepared = prepare(&request, &vars, &dir)?;
-    let options = send_options(&args.common).for_request(&prepared);
-    let response = send(&prepared, &options).await?;
-
+    let mut runner = Runner::new(collection.as_ref(), args.common.env.as_deref(), overrides(&args.common), Vars::new(), send_options(&args.common))?;
+    let mut exchanges = runner.send(id.as_deref(), &request, &dir).await;
+    let last = exchanges.pop().expect("the request itself is always there");
+    let paint = Paint::stderr();
+    if !args.quiet {
+        for ex in &exchanges {
+            let status = ex.result.as_ref().map_or_else(|e| paint.red(&e.to_string()), |r| paint.status(r.status, &r.status.to_string()));
+            eprintln!("{}", paint.dim(&format!("Сначала {}: {status}", ex.id.as_deref().unwrap_or_default())));
+        }
+    }
+    let passed = last.passed();
+    let lines = check_lines(&last, &paint);
+    let response = last.result?;
     if !args.quiet {
         print_head(&response, args.include);
+        for line in lines {
+            eprintln!("{line}");
+        }
     }
     write_body(&response, &args)?;
-    Ok(if args.fail && response.status >= 400 { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+    Ok(if !passed || (args.fail && response.status >= 400) { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+}
+
+/// ✓ and ✗ under a request: its checks, and what it captured or could not.
+fn check_lines(ex: &Exchange, paint: &Paint) -> Vec<String> {
+    let mut out = Vec::new();
+    for c in &ex.checks {
+        if c.ok {
+            out.push(format!("  {} {}", paint.green("✓"), paint.dim(&c.check)));
+        } else {
+            let why = c.error.clone().or_else(|| c.actual.as_ref().map(|a| format!("пришло {a}"))).unwrap_or_default();
+            out.push(format!("  {} {} {}", paint.red("✗"), c.check, paint.red(&format!("— {why}"))));
+        }
+    }
+    for c in &ex.captures {
+        match &c.error {
+            None => out.push(format!("  {}", paint.dim(&format!("→ {}", c.name)))),
+            Some(e) => out.push(format!("  {} {}", paint.red("✗"), paint.red(&format!("{}: {e}", c.name)))),
+        }
+    }
+    out
 }
 
 fn print_head(r: &Response, include: bool) {
@@ -310,61 +355,75 @@ fn write_body(r: &Response, args: &SendArgs) -> tsubamedo_core::Result<()> {
 
 async fn run(args: RunArgs) -> tsubamedo_core::Result<ExitCode> {
     let collection = Collection::open(&args.dir)?;
-    let vars = collection.vars(args.common.env.as_deref(), &overrides(&args.common))?;
-    let options = send_options(&args.common);
+    let mut runner = Runner::new(Some(&collection), args.common.env.as_deref(), overrides(&args.common), Vars::new(), send_options(&args.common))?;
     let paint = Paint::stdout();
     let started = Instant::now();
-    let (mut passed, mut failed) = (0, 0);
+    let mut report = junit::Report::new(&collection.name);
 
     for broken in &collection.broken {
         println!("{} {broken}", paint.red("✗"));
-        failed += 1;
+        report.broken(&broken.to_string());
     }
     let filter = args.filter.as_deref().map(str::to_lowercase);
-    for entry in &collection.requests {
-        if let Some(f) = &filter
-            && !entry.id.to_lowercase().contains(f)
-            && !entry.display_name().to_lowercase().contains(f)
-        {
-            continue;
-        }
-        let title = match &entry.request.name {
-            Some(name) => format!("{}  {}", entry.id, paint.dim(name)),
-            None => entry.id.clone(),
-        };
-        let result = match prepare(&entry.request, &vars, entry.dir()) {
-            Ok(prepared) => send(&prepared, &options.for_request(&prepared)).await,
-            Err(e) => Err(e),
-        };
-        let ok = match &result {
-            Ok(r) => {
-                let ok = !(args.fail && r.status >= 400);
-                let mark = if ok { paint.green("✓") } else { paint.red("✗") };
-                println!(
-                    "{mark} {}  {:>8}  {:>9}  {} {title}",
-                    paint.status(r.status, &r.status.to_string()),
-                    duration(r.timings.total),
-                    size(r.body.len()),
-                    entry.request.method,
-                );
-                ok
+    let wanted = |entry: &tsubamedo_core::collection::Entry| {
+        filter.as_ref().is_none_or(|f| entry.id.to_lowercase().contains(f) || entry.display_name().to_lowercase().contains(f))
+    };
+    let plan: Vec<(String, Request, PathBuf)> =
+        runner.order(&collection, wanted).into_iter().map(|e| (e.id.clone(), e.request.clone(), e.dir().to_path_buf())).collect();
+
+    'run: for (id, request, dir) in plan {
+        for ex in runner.send(Some(&id), &request, &dir).await {
+            let status = ex.result.as_ref().ok().map(|r| r.status);
+            let failures = {
+                let mut f = ex.failures();
+                if args.fail && status.is_some_and(|s| s >= 400) {
+                    f.push(format!("статус {}", status.unwrap_or_default()));
+                }
+                f
+            };
+            let ok = failures.is_empty();
+            let entry = collection.find(ex.id.as_deref().unwrap_or_default());
+            let title = match entry.and_then(|e| e.request.name.as_deref()) {
+                Some(name) => format!("{}  {}", ex.id.as_deref().unwrap_or_default(), paint.dim(name)),
+                None => ex.id.clone().unwrap_or_default(),
+            };
+            let mark = if ok { paint.green("✓") } else { paint.red("✗") };
+            match &ex.result {
+                Ok(r) => {
+                    let checks = if ex.checks.is_empty() {
+                        String::new()
+                    } else {
+                        paint.dim(&format!("  проверки {}/{}", ex.checks.iter().filter(|c| c.ok).count(), ex.checks.len()))
+                    };
+                    println!(
+                        "{mark} {}  {:>8}  {:>9}  {} {title}{checks}",
+                        paint.status(r.status, &r.status.to_string()),
+                        duration(r.timings.total),
+                        size(r.body.len()),
+                        ex.request.method.to_ascii_uppercase(),
+                    );
+                    for line in check_lines(&ex, &paint).into_iter().filter(|l| !ok || !l.contains('✓')) {
+                        println!("  {line}");
+                    }
+                    if args.fail && r.status >= 400 && ex.checks.is_empty() {
+                        println!("    {}", paint.red(&format!("статус {}", r.status)));
+                    }
+                }
+                Err(e) => println!("{mark} {title}\n    {}", paint.red(&e.to_string())),
             }
-            Err(e) => {
-                println!("{} {title}\n    {}", paint.red("✗"), paint.red(&e.to_string()));
-                false
-            }
-        };
-        if ok {
-            passed += 1;
-        } else {
-            failed += 1;
-            if args.bail {
-                break;
+            report.case(&ex, &failures);
+            if !ok && args.bail {
+                break 'run;
             }
         }
     }
+    let (passed, failed) = report.counts();
     let summary = format!("Успешно: {passed}, с ошибкой: {failed}, за {}", duration(started.elapsed()));
     println!("\n{}", if failed == 0 { paint.green(&summary) } else { paint.red(&summary) });
+    if let Some(path) = &args.junit {
+        std::fs::write(path, report.xml(started.elapsed())).map_err(|e| Error::io(path, e))?;
+        println!("{}", paint.dim(&format!("Отчёт JUnit: {}", path.display())));
+    }
     Ok(if failed == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE })
 }
 

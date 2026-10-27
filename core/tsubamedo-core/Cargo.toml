@@ -30,6 +30,8 @@ webpki-roots = "1"
 memchr = "2"
 memmap2 = "0.9"
 regex = "1"
+serde_json_path = "0.7"
+serde_json.workspace = true
 
 [dev-dependencies]
 hyper = { version = "1", features = ["server", "http1"] }

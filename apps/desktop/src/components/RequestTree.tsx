@@ -14,6 +14,8 @@ export interface TreeOps {
   move: (kind: Kind, path: string, folder: string) => Promise<void>;
   duplicate: (id: string) => Promise<void>;
   remove: (kind: Kind, path: string) => Promise<void>;
+  /** Runs the folder's requests, or the whole collection for "". */
+  run: (folder: string) => void;
 }
 
 interface Row {
@@ -125,6 +127,8 @@ export function RequestTree({
       items = [
         { label: "Новый запрос", onClick: () => startNewRequest("") },
         { label: "Новая папка", onClick: () => startNewFolder("") },
+        { separator: true, label: "" },
+        { label: "Запустить всю коллекцию", onClick: () => ops.run("") },
       ];
     } else if (row.kind === "request") {
       items = [
@@ -138,6 +142,8 @@ export function RequestTree({
     } else {
       const count = collection.requests.filter((r) => r.id.startsWith(`${row.path}/`)).length;
       items = [
+        { label: "Запустить папку", disabled: count === 0, onClick: () => ops.run(row.path) },
+        { separator: true, label: "" },
         { label: "Новый запрос здесь", onClick: () => startNewRequest(row.path) },
         { label: "Новая папка внутри", onClick: () => startNewFolder(row.path) },
         { label: "Переименовать", onClick: () => setRenaming({ kind: "folder", path: row.path }) },

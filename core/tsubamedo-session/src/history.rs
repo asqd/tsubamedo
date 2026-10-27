@@ -4,6 +4,7 @@
 //! The request is stored as written, with `{{variables}}`, so secrets from `*.local.toml` are
 //! not copied out. Values of auth-like headers in the "sent" part are masked.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -34,6 +35,16 @@ pub struct Entry {
     pub has_body: bool,
     /// The response as the window shows it (without its body and response id).
     pub meta: Option<Value>,
+}
+
+/// Captured values by environment (`""` without one): variable → value and where it came from.
+pub type CapturedStore = BTreeMap<String, BTreeMap<String, CapturedValue>>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapturedValue {
+    pub value: String,
+    /// The request id, or «черновик».
+    pub from: String,
 }
 
 pub struct History {
@@ -158,6 +169,18 @@ impl History {
         if changed { self.write_all(&entries) } else { Ok(()) }
     }
 
+    /// Values captured from responses, kept between runs so a token from yesterday's login
+    /// still works.
+    pub fn captured(&self) -> CapturedStore {
+        fs::read(self.dir.join("captured.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    pub fn save_captured(&self, store: &CapturedStore) -> std::io::Result<()> {
+        fs::create_dir_all(&self.dir)?;
+        fs::write(self.dir.join("captured.json"), serde_json::to_vec_pretty(store)?)
+    }
+
+    /// History, kept bodies and captured values.
     pub fn clear(&self) -> std::io::Result<()> {
         match fs::remove_dir_all(&self.dir) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),

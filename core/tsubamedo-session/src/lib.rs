@@ -23,7 +23,7 @@ use tsubamedo_core::run::{self, Event, Exchange, RunOptions, Runner};
 use tsubamedo_core::http::proxy::{self, Proxy};
 use tsubamedo_core::http::{CertSpec, ClientCert, ProxyConfig, Redirect, Response, ResponseBody, SendOptions, Timings, TlsInfo};
 use tsubamedo_core::organize;
-use tsubamedo_core::prepare::{prepare, render_oauth};
+use tsubamedo_core::prepare::{prepare_without_files, render_oauth};
 use tsubamedo_core::request_file::RequestFile;
 use tsubamedo_core::view::{Matcher, TextView};
 use tsubamedo_core::{Auth, OAuth2, Request, Vars};
@@ -218,7 +218,8 @@ impl Session {
             "importPreview" => self.import_preview(args::<PathArg>(a)?.path),
             "importCollection" => self.import_collection(args(a)?),
             "importCurl" => reply(tsubamedo_core::curl::parse(&args::<TextArg>(a)?.text).map_err(|e| e.to_string())?),
-            "curl" => self.curl(args(a)?),
+            "curl" | "code" => self.code(args(a)?),
+            "languages" => reply(tsubamedo_core::codegen::LANGUAGES),
             "view" => self.view(args(a)?).await,
             "viewLines" => self.view_lines(args(a)?),
             "viewSearch" => self.view_search(args(a)?).await,
@@ -710,9 +711,21 @@ impl Session {
         })
     }
 
-    fn curl(&self, a: CurlArg) -> Reply {
-        let (vars, dir) = self.context(a.id.as_deref(), a.env.as_deref())?;
-        let mut prepared = prepare(&a.request, &vars, &dir).map_err(|e| e.to_string())?;
+    /// The request as code in `lang` (`curl` when not given).
+    fn code(&self, a: CodeArg) -> Reply {
+        let (_, dir) = self.context(a.id.as_deref(), a.env.as_deref())?;
+        // Values captured from responses too, as a send would use.
+        let mut vars = self.runner(a.env.as_deref(), false)?.vars();
+        let mut prepared = match prepare_without_files(&a.request, &vars, &dir) {
+            // Not set yet: a visible `<name>` in the code rather than no code.
+            Err(tsubamedo_core::Error::UndefinedVars(names)) => {
+                vars.extend(names.iter().map(|n| (n.clone(), format!("<{n}>"))));
+                // In the address a placeholder makes no address: then the error as it was.
+                prepare_without_files(&a.request, &vars, &dir).map_err(|_| tsubamedo_core::Error::UndefinedVars(names))
+            }
+            other => other,
+        }
+        .map_err(|e| e.to_string())?;
         // The kept OAuth 2.0 token, so the command works as is while it lasts.
         if let Some(o) = &prepared.oauth
             && prepared.header("authorization").is_none()
@@ -724,7 +737,8 @@ impl Session {
                 prepared.headers.push(("Authorization".into(), token.header()));
             }
         }
-        Ok(Value::String(tsubamedo_core::curl::to_curl(&prepared, &a.request.body, &vars)))
+        let spec = tsubamedo_core::codegen::Spec::new(&prepared, &a.request.body, &vars);
+        Ok(Value::String(tsubamedo_core::codegen::generate(a.lang.as_deref().unwrap_or("curl"), &spec)?))
     }
 
     /// Sends the request, first those whose captured values it needs and does not have yet.
@@ -1151,10 +1165,11 @@ struct TextArg {
 }
 
 #[derive(Deserialize)]
-struct CurlArg {
+struct CodeArg {
     id: Option<String>,
     request: Request,
     env: Option<String>,
+    lang: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -34,6 +34,16 @@ impl Prepared {
 
 /// `base_dir` resolves relative file paths of the body (the request file's folder).
 pub fn prepare(request: &Request, vars: &Vars, base_dir: &Path) -> Result<Prepared> {
+    prepare_with(request, vars, base_dir, true)
+}
+
+/// The same without reading the files of a multipart or file body (their bytes stay empty):
+/// for code and curl commands, which name the files instead.
+pub fn prepare_without_files(request: &Request, vars: &Vars, base_dir: &Path) -> Result<Prepared> {
+    prepare_with(request, vars, base_dir, false)
+}
+
+fn prepare_with(request: &Request, vars: &Vars, base_dir: &Path, read_files: bool) -> Result<Prepared> {
     let mut r = Renderer::new(vars);
     let url = r.render(&request.url);
     let mut query = render_pairs(&mut r, &request.query);
@@ -106,9 +116,10 @@ pub fn prepare(request: &Request, vars: &Vars, base_dir: &Path) -> Result<Prepar
         Plan::Multipart(parts) => {
             let boundary = format!("----TsubameDo{}", uuid::Uuid::new_v4().simple());
             push_default(&mut headers, "Content-Type", format!("multipart/form-data; boundary={boundary}"));
-            multipart(&boundary, &parts, base_dir)?
+            if read_files { multipart(&boundary, &parts, base_dir)? } else { Bytes::new() }
         }
-        Plan::File(path) => Bytes::from(fs::read(&path).map_err(|e| Error::io(&path, e))?),
+        Plan::File(path) if read_files => Bytes::from(fs::read(&path).map_err(|e| Error::io(&path, e))?),
+        Plan::File(_) => Bytes::new(),
     };
 
     let mut url = parse_url(&url)?;

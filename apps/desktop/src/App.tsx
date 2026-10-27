@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, CollectionInfo, emptyRequest, ImportPreview, Reorganized, Request } from "./api";
 import { when } from "./format";
+import { CodeDialog } from "./components/CodeDialog";
 import { ComparePanel, CompareState } from "./components/ComparePanel";
 import { ContextMenu, MenuItem } from "./components/ContextMenu";
 import { CookiesDialog } from "./components/CookiesDialog";
@@ -392,15 +393,8 @@ export default function App() {
     return true;
   };
 
-  const copyCurl = async () => {
-    try {
-      const command = await api.curl(tab.id, tab.request, env);
-      await navigator.clipboard.writeText(command);
-      flash({ text: "Команда curl скопирована" });
-    } catch (e) {
-      setProblem((e as Error).message);
-    }
-  };
+  const [codeOpen, setCodeOpen] = useState(false);
+
 
   const open = async () => {
     const path = await pickFolder();
@@ -741,7 +735,7 @@ export default function App() {
                   sending={Boolean(tab.sendId)}
                   saved={tab.id}
                   onPasteCurl={pasteCurl}
-                  onCopyCurl={copyCurl}
+                  onShowCode={() => setCodeOpen(true)}
                   env={env}
                 />
               </section>
@@ -775,6 +769,7 @@ export default function App() {
           </div>
         )}
         {compareMenu && <ContextMenu x={compareMenu.x} y={compareMenu.y} items={compareMenu.items} onClose={() => setCompareMenu(null)} />}
+        {codeOpen && <CodeDialog id={tab.id} request={tab.request} env={env} onClose={() => setCodeOpen(false)} />}
         {cookiesOpen && <CookiesDialog env={env} onClose={() => setCookiesOpen(false)} />}
         {settingsOpen && <SettingsDialog collection={collection} env={env} onClose={() => setSettingsOpen(false)} />}
         {importing && (

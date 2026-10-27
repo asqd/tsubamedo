@@ -387,3 +387,20 @@ async fn compares_environments_and_history() {
     let same = call(&s, "compare", json!({ "left": side(&a), "right": { "historyId": stage_entry } })).await;
     assert_eq!(same["body"], json!({ "kind": "same", "size": 53 }));
 }
+
+#[tokio::test]
+async fn code_in_other_languages() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("tsubamedo.toml"), "name = \"Код\"\n[vars]\nbase = \"https://api.test\"\n").unwrap();
+    let s = Session::new();
+    call(&s, "openCollection", json!({ "path": dir.path() })).await;
+    let request = json!({ "name": null, "method": "POST", "url": "{{base}}/orders", "query": [], "headers": [{ "name": "Authorization", "value": "Bearer {{token}}", "enabled": true }],
+        "auth": { "type": "none" }, "body": { "type": "multipart", "parts": [{ "name": "photo", "value": "нет-такого.png", "isFile": true, "enabled": true }] }, "options": {} });
+    let code = call(&s, "code", json!({ "request": request, "env": null, "lang": "python-requests" })).await;
+    let code = code.as_str().unwrap();
+    // A file that is not there and a variable not set yet still give code.
+    assert!(code.contains("\"Authorization\": \"Bearer <token>\"") && code.contains("open(\"нет-такого.png\", \"rb\")"), "{code}");
+    let langs = call(&s, "languages", json!({})).await;
+    assert_eq!(langs[0], json!({ "id": "curl", "group": "Shell", "name": "curl" }));
+    assert!(langs.as_array().unwrap().len() >= 20);
+}

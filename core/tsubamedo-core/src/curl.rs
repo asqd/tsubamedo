@@ -5,7 +5,7 @@ use base64::Engine;
 
 use crate::model::{Auth, Body, Pair, Part, Request};
 use crate::prepare::Prepared;
-use crate::template::{Vars, render};
+use crate::template::Vars;
 use crate::{Error, Result};
 
 /// Reads a bash-style `curl …` command (line continuations, '…', "…", $'…').
@@ -370,51 +370,7 @@ fn hex_char(chars: &mut std::iter::Peekable<std::str::Chars>, max: usize) -> cha
 /// A shell-ready command for the prepared request: variables substituted, headers as sent.
 /// Multipart and file bodies stay as `-F`/`@file`, so the command stays readable.
 pub fn to_curl(prepared: &Prepared, body: &Body, vars: &Vars) -> String {
-    let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
-    let mut out = String::from("curl");
-    let mut line = |part: String| {
-        out.push_str(" \\\n  ");
-        out.push_str(&part);
-    };
-    let implied = match body {
-        Body::None => "GET",
-        _ => "POST",
-    };
-    if prepared.method != implied {
-        line(format!("-X {}", prepared.method));
-    }
-    line(q(prepared.url.as_str()));
-    let multipart = matches!(body, Body::Multipart { .. });
-    for (name, value) in &prepared.headers {
-        // curl writes the multipart boundary itself.
-        if multipart && name.eq_ignore_ascii_case("content-type") {
-            continue;
-        }
-        line(format!("-H {}", q(&format!("{name}: {value}"))));
-    }
-    let r = |s: &str| render(s, vars).unwrap_or_else(|_| s.to_string());
-    match body {
-        Body::None => {}
-        Body::Multipart { parts } => {
-            for p in parts.iter().filter(|p| p.enabled) {
-                let value = if p.is_file { format!("@{}", r(&p.value)) } else { r(&p.value) };
-                let flag = if p.is_file { "-F" } else { "--form-string" };
-                line(format!("{flag} {}", q(&format!("{}={value}", r(&p.name)))));
-            }
-        }
-        Body::File { path, .. } => line(format!("--data-binary {}", q(&format!("@{}", r(path))))),
-        _ => line(format!("--data-raw {}", q(&String::from_utf8_lossy(&prepared.body)))),
-    }
-    if let Some((user, password)) = &prepared.digest {
-        line(format!("--digest -u {}", q(&format!("{user}:{password}"))));
-    }
-    if prepared.options.verify_tls == Some(false) {
-        line("-k".into());
-    }
-    if prepared.options.follow_redirects != Some(false) {
-        line("-L".into());
-    }
-    out
+    crate::codegen::generate("curl", &crate::codegen::Spec::new(prepared, body, vars)).expect("curl is a known language")
 }
 
 #[cfg(test)]

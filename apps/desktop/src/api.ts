@@ -50,6 +50,13 @@ export interface TokenInfo {
   scope: string | null;
 }
 
+/** A target of code generation: `python-requests` is Python — requests. */
+export interface Language {
+  id: string;
+  group: string;
+  name: string;
+}
+
 /** Two responses side by side; see core/src/compare.rs. */
 export interface Comparison {
   status: [number, number];
@@ -383,6 +390,9 @@ export const api = {
   importCollection: (path: string, parent: string | null) => call<Imported>("importCollection", { path, parent }),
   importCurl: (text: string) => call<Request>("importCurl", { text }),
   curl: (id: string | null, request: Request, env: string | null) => call<string>("curl", { id, request, env }),
+  /** The request as code in a language of `languages()`. */
+  code: (id: string | null, request: Request, env: string | null, lang: string) => call<string>("code", { id, request, env, lang }),
+  languages: () => call<Language[]>("languages"),
   /** Lets the core drop the bodies of responses up to `seen` that no tab shows. */
   retain: (responses: number[], seen: number) => call<null>("retain", { responses, seen }),
   view: (responseId: number, pretty: boolean) => call<ViewInfo>("view", { responseId, pretty }),

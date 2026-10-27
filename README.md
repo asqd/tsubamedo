@@ -257,7 +257,9 @@ token, password, key…) пишутся в `*.local.toml`. Чего в TsubameDo
 - `{{переменные}}` подсвечиваются везде, где их можно написать: незаданные — красным,
   при наведении видно значение и файл, откуда оно взято. После `{{` появляются подсказки.
 - Команду curl (например, «Copy as cURL» из браузера) можно просто вставить в адрес — она
-  станет запросом. Обратно — «Скопировать как curl».
+  станет запросом. Обратно — «Код…»: запрос как curl, Python (requests), JavaScript
+  (fetch, axios), Node.js, Go, Java, Kotlin, C#, PHP, Ruby, Swift, Rust, Dart, C, HTTPie,
+  wget, PowerShell или сырой HTTP, с подставленными переменными.
 - ⌘↵ — отправить, ⌘F — поиск в ответе или в теле запроса.
 - Боковая панель повторяет папку коллекции: правый клик — переименовать, дублировать,
   перенести, удалить (в Корзину); запросы и папки можно перетаскивать.
@@ -298,6 +300,7 @@ tsubamedo run -e stage --junit report.xml     # и отчёт JUnit XML для G
 tsubamedo run --filter orders --var token=$T  # только заказы; токен дан — вход не нужен
 tsubamedo run -p 4 --retry 2                  # по 4 запроса сразу, упавшие — ещё до 2 раз
 tsubamedo compare orders/list -e stage --with prod --ignore requestId  # различия, код 1
+tsubamedo code orders/list -e stage -l python-requests  # запрос как код; --list — все языки
 tsubamedo check                               # все ли переменные заданы во всех окружениях
 tsubamedo import insomnia.json                # новая коллекция ./<имя> из Insomnia, Postman…
 tsubamedo import openapi.yaml --to my-api     # в коллекцию my-api, в папку по имени API

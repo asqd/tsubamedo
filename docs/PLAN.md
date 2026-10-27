@@ -200,7 +200,19 @@ Postman. У нас — точечное сохранение файлов без
       окружением (запрос уходит туда же) или с прошлым ответом из истории; ⊘ у изменения
       добавляет его путь в «не сравнивать», список запоминается для запроса. CLI:
       `tsubamedo compare запрос -e stage --with prod --ignore requestId`, код 1 при различиях.
-- [ ] Генерация кода: curl, Python requests, JS fetch.
+- [x] Генерация кода (`codegen/`), набор как у Insomnia (httpsnippet): Shell — curl, HTTPie,
+      wget; PowerShell; Python — requests, http.client; JavaScript — fetch, axios,
+      XMLHttpRequest; Node.js — fetch, axios, http; Go; Java — HttpClient, OkHttp; Kotlin
+      (OkHttp); C# (HttpClient); PHP — cURL, Guzzle; Ruby; Swift; Rust (reqwest); Dart; C
+      (libcurl); сырой HTTP/1.1. JSON для requests — словарём, для JavaScript — объектом;
+      формы — парами; файлы multipart и тела — по путям (`prepare_without_files`: для кода
+      файлы не читаются). Чего библиотека не повторит (Digest, выключенная проверка
+      сертификата, без перенаправлений, multipart в низкоуровневых клиентах), сказано
+      комментарием в начале кода. Строки экранируются по правилам языка (`$` в Kotlin и Dart,
+      `\u{…}` в Swift и Rust, восьмеричные в C). Незаданные переменные — `<имя>`, кроме адреса.
+      Сгенерированный код запускается по-настоящему: `cargo test -p tsubamedo-core --test
+      codegen -- --ignored` — curl, Python, Node, Go, Ruby, Swift и C против эхо-сервера, 29
+      прогонов. В окне — «Код…» у запроса; в CLI — `tsubamedo code запрос -l go`.
 
 ## Этап 5. Работа в команде без облака
 

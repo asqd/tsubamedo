@@ -366,6 +366,11 @@ button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 .modal p { margin: 10px 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .cookies-dialog { width: min(720px, 100%); }
+.code-dialog { width: min(820px, 100%); display: flex; flex-direction: column; }
+.code-head { display: flex; align-items: center; gap: 12px; }
+.code-head h2 { margin: 0; }
+.code-view { margin: 4px 0 0; padding: 10px 12px; max-height: 60vh; overflow: auto; background: var(--sunken); border-radius: 6px; font-size: 12px; line-height: 1.5; white-space: pre; user-select: text; }
+.modal-actions .faint { margin-right: auto; align-self: center; }
 .settings-dialog { width: min(680px, 100%); }
 .settings-dialog .section-gap { margin-top: 18px; }
 .choice { border: 0; padding: 0; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }

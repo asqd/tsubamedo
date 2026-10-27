@@ -19,7 +19,7 @@ export function RequestEditor({
   sending,
   saved,
   onPasteCurl,
-  onCopyCurl,
+  onShowCode,
   env,
 }: {
   request: Request;
@@ -30,7 +30,7 @@ export function RequestEditor({
   saved: string | null;
   /** A curl command pasted into the address; true when it was imported. */
   onPasteCurl: (text: string) => boolean;
-  onCopyCurl: () => void;
+  onShowCode: () => void;
   /** The open environment: OAuth 2.0 tokens and cookies are kept per settings and per it. */
   env: string | null;
 }) {
@@ -60,8 +60,8 @@ export function RequestEditor({
           disabled={!saved}
           onChange={(e) => set({ name: e.target.value || null })}
         />
-        <button className="ghost small" onClick={onCopyCurl} title="Скопировать как команду curl с подставленными переменными">
-          Скопировать как curl
+        <button className="ghost small" onClick={onShowCode} title="Запрос в виде кода: curl, Python, JavaScript, Go и другие">
+          Код…
         </button>
       </div>
       <div className="urlbar">

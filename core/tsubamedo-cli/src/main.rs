@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 
 use clap::{Args, Parser, Subcommand};
 use tsubamedo_core::collection::{Collection, MANIFEST};
+use tsubamedo_core::codegen;
 use tsubamedo_core::compare::{self, BodyDiff, ChangeKind, Options, Side};
+use tsubamedo_core::prepare::prepare_without_files;
 use tsubamedo_core::http::{CertSpec, ClientCert, ProxyConfig, Response, SendOptions};
 use tsubamedo_core::prepare::prepare;
 use tsubamedo_core::request_file::RequestFile;
@@ -36,6 +38,8 @@ enum Command {
     Run(RunArgs),
     /// Сравнить ответы одного запроса в двух окружениях: stage и prod.
     Compare(CompareArgs),
+    /// Запрос в виде кода: curl, Python, JavaScript, Go и ещё 20 вариантов.
+    Code(CodeArgs),
     /// Проверить, что файлы читаются и все переменные заданы.
     Check(CheckArgs),
     /// Перенести коллекцию Insomnia или Postman, описание OpenAPI или Swagger, запись HAR.
@@ -171,6 +175,25 @@ struct CompareArgs {
 }
 
 #[derive(Args)]
+struct CodeArgs {
+    /// Запрос коллекции (имя или файл) или адрес.
+    #[arg(required_unless_present = "list")]
+    target: Option<String>,
+    /// Язык: curl, python-requests, js-fetch, go… (--list покажет все).
+    #[arg(short, long, default_value = "curl")]
+    lang: String,
+    /// Окружение из папки env коллекции.
+    #[arg(short, long)]
+    env: Option<String>,
+    /// Переменная поверх всех остальных: --var token=abc.
+    #[arg(long = "var", value_name = "ИМЯ=ЗНАЧЕНИЕ", value_parser = parse_var)]
+    vars: Vec<(String, String)>,
+    /// Показать языки.
+    #[arg(long)]
+    list: bool,
+}
+
+#[derive(Args)]
 struct CheckArgs {
     #[arg(default_value = ".")]
     dir: PathBuf,
@@ -191,6 +214,7 @@ async fn main() -> ExitCode {
         Command::Send(args) => send_one(args).await,
         Command::Run(args) => run(args).await,
         Command::Compare(args) => compare(args).await,
+        Command::Code(args) => code(args),
         Command::Check(args) => check(args),
         Command::Import { file, to } => import(&file, to),
         Command::Init { dir } => init(&dir),
@@ -529,6 +553,42 @@ fn print_exchange(ex: &Exchange, collection: &Collection, args: &RunArgs, paint:
         Err(e) => println!("{mark} {title}\n    {}", paint.red(&e.to_string())),
     }
     failures
+}
+
+fn code(args: CodeArgs) -> tsubamedo_core::Result<ExitCode> {
+    if args.list {
+        for l in codegen::LANGUAGES {
+            println!("{:<20} {} — {}", l.id, l.group, l.name);
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    let target = args.target.as_deref().unwrap_or_default();
+    let Target { request, collection, dir, .. } = resolve_target(target, args.env.as_deref())?;
+    let overrides: Vars = args.vars.iter().cloned().collect();
+    let mut vars = match &collection {
+        Some(c) => c.vars(args.env.as_deref(), &overrides)?,
+        None => overrides,
+    };
+    let prepared = match prepare_without_files(&request, &vars, &dir) {
+        // Not set: `<name>` in the code, said on stderr.
+        Err(Error::UndefinedVars(names)) => {
+            let mut with = vars.clone();
+            with.extend(names.iter().map(|n| (n.clone(), format!("<{n}>"))));
+            // In the address a placeholder makes no address: then the error as it was.
+            let prepared = prepare_without_files(&request, &with, &dir).map_err(|_| Error::UndefinedVars(names.clone()))?;
+            eprintln!("{}", Paint::stderr().yellow(&format!("не заданы переменные: {} — в коде они как <имя>", names.join(", "))));
+            vars = with;
+            prepared
+        }
+        other => other?,
+    };
+    let spec = codegen::Spec::new(&prepared, &request.body, &vars);
+    let code = codegen::generate(&args.lang, &spec).map_err(Error::Invalid)?;
+    print!("{code}");
+    if !code.ends_with('\n') {
+        println!();
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// The same request in two environments, sent side by side; exit code 1 when they differ.

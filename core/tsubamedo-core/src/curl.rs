@@ -405,6 +405,9 @@ pub fn to_curl(prepared: &Prepared, body: &Body, vars: &Vars) -> String {
         Body::File { path, .. } => line(format!("--data-binary {}", q(&format!("@{}", r(path))))),
         _ => line(format!("--data-raw {}", q(&String::from_utf8_lossy(&prepared.body)))),
     }
+    if let Some((user, password)) = &prepared.digest {
+        line(format!("--digest -u {}", q(&format!("{user}:{password}"))));
+    }
     if prepared.options.verify_tls == Some(false) {
         line("-k".into());
     }

@@ -20,7 +20,8 @@ use tsubamedo_core::collection::{Collection, VarSource};
 use tsubamedo_core::cookies::{Jar, SharedJar};
 use tsubamedo_core::oauth::{self, SharedTokens};
 use tsubamedo_core::run::{self, Event, Exchange, RunOptions, Runner};
-use tsubamedo_core::http::{Redirect, Response, ResponseBody, SendOptions, Timings, TlsInfo};
+use tsubamedo_core::http::proxy::{self, Proxy};
+use tsubamedo_core::http::{CertSpec, ClientCert, ProxyConfig, Redirect, Response, ResponseBody, SendOptions, Timings, TlsInfo};
 use tsubamedo_core::organize;
 use tsubamedo_core::prepare::{prepare, render_oauth};
 use tsubamedo_core::request_file::RequestFile;
@@ -40,6 +41,14 @@ pub struct Session {
     runs: Mutex<HashMap<String, Value>>,
     /// Where history is kept; without it nothing is remembered between runs.
     data_dir: Option<PathBuf>,
+    /// The app's own settings, not the collection's: they belong to this machine.
+    settings: Mutex<Settings>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct Settings {
+    #[serde(default)]
+    proxy: ProxyConfig,
 }
 
 #[derive(Default)]
@@ -161,7 +170,8 @@ impl Session {
 
     /// A session keeping history in `data_dir` (the app's data folder).
     pub fn with_data_dir(data_dir: PathBuf) -> Arc<Self> {
-        let session = Session { data_dir: Some(data_dir), ..Session::default() };
+        let settings = std::fs::read(data_dir.join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let session = Session { data_dir: Some(data_dir), settings: Mutex::new(settings), ..Session::default() };
         let history = session.history();
         session.state.lock().unwrap().load(history.as_ref());
         Arc::new(session)
@@ -273,6 +283,35 @@ impl Session {
                 jar.lock().unwrap().clear();
                 self.save_stores();
                 Ok(Value::Null)
+            }
+            "proxySettings" => {
+                let proxy = self.settings.lock().unwrap().proxy.clone();
+                let system = blocking(|| Ok(proxy::system())).await?;
+                Ok(json!({ "proxy": proxy, "system": system }))
+            }
+            "saveProxy" => {
+                let a: ProxyArg = args(a)?;
+                if let ProxyConfig::Custom { url, .. } = &a.proxy
+                    && !url.trim().is_empty()
+                {
+                    Proxy::parse(url)?;
+                }
+                let mut settings = self.settings.lock().unwrap();
+                settings.proxy = a.proxy;
+                if let Some(data) = &self.data_dir {
+                    std::fs::create_dir_all(data).map_err(|e| e.to_string())?;
+                    std::fs::write(data.join("settings.json"), serde_json::to_vec_pretty(&*settings).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+                }
+                Ok(Value::Null)
+            }
+            "certificates" => self.certificates(args::<EnvArg>(a)?.env).await,
+            "saveCertificates" => {
+                let a: CertificatesArg = args(a)?;
+                {
+                    let state = self.state.lock().unwrap();
+                    state.collection()?.save_certificates(&a.certificates).map_err(|e| e.to_string())?;
+                }
+                self.certificates(a.env).await
             }
             "oauthStatus" => self.oauth_status(args(a)?).await,
             "oauthToken" => self.oauth_token(args(a)?).await,
@@ -488,7 +527,8 @@ impl Session {
         let captured: Vars =
             state.captured.get(env.unwrap_or_default()).map(|m| m.iter().map(|(k, v)| (k.clone(), v.value.clone())).collect()).unwrap_or_default();
         let jar = state.jar(env);
-        let options = SendOptions { verify_tls: !insecure, cookies: Some(jar), ..SendOptions::default() };
+        let proxy = self.settings.lock().unwrap().proxy.clone();
+        let options = SendOptions { verify_tls: !insecure, cookies: Some(jar), proxy, ..SendOptions::default() };
         let runner = Runner::new(state.collection.as_ref(), env, Vars::new(), captured, options).map_err(|e| e.to_string())?;
         Ok(runner.with_tokens(state.tokens.clone()))
     }
@@ -522,6 +562,37 @@ impl Session {
         Ok((o, self.state.lock().unwrap().tokens.clone()))
     }
 
+    /// The collection's client certificates and whether each can be read in this environment.
+    async fn certificates(&self, env: Option<String>) -> Reply {
+        let (specs, vars, root) = {
+            let state = self.state.lock().unwrap();
+            let c = state.collection()?;
+            let specs = c.certificates().map_err(|e| e.to_string())?;
+            let vars = c.vars(env.as_deref(), &Vars::new()).map_err(|e| e.to_string())?;
+            (specs, vars, c.root.clone())
+        };
+        // A PKCS#12 file is opened with `openssl`: off the async threads.
+        blocking(move || {
+            Ok(Value::Array(
+                specs
+                    .into_iter()
+                    .map(|spec| {
+                        let rendered = (|| {
+                            let r = |s: &str| tsubamedo_core::template::render(s, &vars).map_err(|e| e.to_string());
+                            Ok::<_, String>(CertSpec { host: r(&spec.host)?, cert: r(&spec.cert)?, key: r(&spec.key)?, passphrase: r(&spec.passphrase)? })
+                        })();
+                        let status = match rendered.map(|s| ClientCert::load(&s, &root).identity) {
+                            Ok(Ok(identity)) => json!({ "ok": true, "text": format!("{}: сертификатов в цепочке {}", identity.label, identity.chain.len()) }),
+                            Ok(Err(e)) | Err(e) => json!({ "ok": false, "text": e }),
+                        };
+                        json!({ "spec": spec, "status": status })
+                    })
+                    .collect(),
+            ))
+        })
+        .await
+    }
+
     /// The kept token for the request's settings, if any.
     async fn oauth_status(&self, a: OAuthArg) -> Reply {
         let (o, tokens) = match self.oauth_settings(&a) {
@@ -536,7 +607,8 @@ impl Session {
     /// A new token now, as the editor's «Получить токен» asks.
     async fn oauth_token(self: Arc<Self>, a: OAuthArg) -> Reply {
         let (o, tokens) = self.oauth_settings(&a)?;
-        let options = SendOptions { verify_tls: !a.insecure, ..SendOptions::default() };
+        let proxy = self.settings.lock().unwrap().proxy.clone();
+        let options = SendOptions { verify_tls: !a.insecure, proxy, ..SendOptions::default() };
         let task = tokio::spawn(async move { oauth::token(&o, &tokens, &options, oauth::Mode::New).await });
         let send_id = a.send_id.clone().unwrap_or_default();
         self.sends.lock().unwrap().insert(send_id.clone(), task.abort_handle());
@@ -966,6 +1038,17 @@ struct EnvArg {
 }
 
 #[derive(Deserialize)]
+struct ProxyArg {
+    proxy: ProxyConfig,
+}
+
+#[derive(Deserialize)]
+struct CertificatesArg {
+    env: Option<String>,
+    certificates: Vec<CertSpec>,
+}
+
+#[derive(Deserialize)]
 struct CookieArg {
     env: Option<String>,
     domain: String,
@@ -1159,6 +1242,8 @@ struct ResponseMeta {
     remote_addr: String,
     tls: Option<TlsInfo>,
     redirects: Vec<Redirect>,
+    /// The proxy it went through.
+    via: Option<String>,
     is_json: bool,
     content_type: Option<String>,
     /// Unix milliseconds.
@@ -1215,6 +1300,7 @@ impl ResponseMeta {
             remote_addr: r.remote_addr.to_string(),
             tls: r.tls.clone(),
             redirects: r.redirects.clone(),
+            via: r.via.clone(),
             is_json: r.is_json() || sniffed_json,
             content_type: r.header("content-type").map(str::to_string),
             received_at: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64),

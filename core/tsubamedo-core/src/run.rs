@@ -8,14 +8,16 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::checks::{self, Answer, CheckResult, Captured};
 use crate::collection::{Collection, Entry};
-use crate::http::{self, Response, SendOptions};
+use crate::http::{self, CertSpec, ClientCert, Response, SendOptions};
+use crate::template::render;
 use crate::oauth::{self, Mode, SharedTokens, Tokens};
 use crate::prepare::{Prepared, prepare, scripts_variables, variables};
-use crate::scripts;
+use crate::{digest, scripts};
 use crate::{Error, Request, Result, Vars};
 
 /// How deep requests may pull in other requests.
@@ -140,11 +142,22 @@ pub struct Runner {
 }
 
 impl Runner {
-    pub fn new(collection: Option<&Collection>, env: Option<&str>, overrides: Vars, captured: Vars, options: SendOptions) -> Result<Self> {
+    pub fn new(collection: Option<&Collection>, env: Option<&str>, overrides: Vars, captured: Vars, mut options: SendOptions) -> Result<Self> {
         let (base, producers) = match collection {
             Some(c) => (c.vars(env, &Vars::new())?, producers(c)),
             None => (Vars::new(), BTreeMap::new()),
         };
+        // The collection's client certificates, after those the caller gave (`--cert`).
+        if let Some(c) = collection {
+            let specs = c.certificates()?;
+            if !specs.is_empty() {
+                let mut vars = base.clone();
+                vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+                let mut certs = (*options.client_certs).clone();
+                certs.extend(specs.iter().map(|s| certificate(s, &vars, &c.root)));
+                options.client_certs = Arc::new(certs);
+            }
+        }
         Ok(Runner {
             base,
             overrides,
@@ -389,6 +402,24 @@ impl Runner {
                     Err(e) => logs.push(format!("сервер не принял сохранённый токен (401), а новый не получен: {e}")),
                 }
             }
+            // Digest: the first answer is the server's challenge; the request goes again with
+            // the answer to it.
+            if let Some((username, password)) = prepared.digest.clone()
+                && prepared.header("authorization").is_none()
+                && let Ok(response) = &result
+                && response.status == 401
+                && let Some(challenge) = digest::challenge(&response.headers)
+            {
+                let uri = &prepared.url[url::Position::BeforePath..url::Position::AfterQuery];
+                let cnonce = uuid::Uuid::new_v4().simple().to_string();
+                match digest::answer(challenge, &prepared.method, uri, &prepared.body, &username, &password, &cnonce) {
+                    Ok(header) => {
+                        set_authorization(&mut prepared, header);
+                        result = http::send(&prepared, &options).await;
+                    }
+                    Err(e) => logs.push(e),
+                }
+            }
             // What the jar added goes into what was sent, so the window shows it.
             if let Ok(Some(cookie)) = result.as_ref().map(|r| r.sent_cookie.clone()) {
                 prepared.headers.retain(|(n, _)| !n.eq_ignore_ascii_case("cookie"));
@@ -453,6 +484,22 @@ impl Runner {
         }
         results.extend(checks::run_checks(&request.checks, &answer, &self.vars(), Some(dir)));
         (results, captures)
+    }
+}
+
+/// A certificate of the collection with variables substituted; a missing one is its error.
+fn certificate(spec: &CertSpec, vars: &Vars, root: &Path) -> ClientCert {
+    let rendered = (|| {
+        Ok::<_, Error>(CertSpec {
+            host: render(&spec.host, vars)?,
+            cert: render(&spec.cert, vars)?,
+            key: render(&spec.key, vars)?,
+            passphrase: render(&spec.passphrase, vars)?,
+        })
+    })();
+    match rendered {
+        Ok(spec) => ClientCert::load(&spec, root),
+        Err(e) => ClientCert { host: spec.host.clone(), identity: Err(e.to_string()) },
     }
 }
 

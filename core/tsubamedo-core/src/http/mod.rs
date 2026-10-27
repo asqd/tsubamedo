@@ -1,13 +1,17 @@
 //! Sending a prepared request.
 //!
 //! Every request opens its own connection (DNS → TCP → TLS → request), so each phase gets an
-//! honest time, as in `curl -w`. HTTP/2 is used when the server offers it over TLS.
+//! honest time, as in `curl -w`. HTTP/2 is used when the server offers it over TLS. Through a
+//! proxy, DNS and connecting are to the proxy, and the tunnel counts as connecting.
 
 pub(crate) mod body;
+pub mod client_cert;
+pub mod proxy;
 mod tls;
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -21,6 +25,8 @@ use tokio::net::TcpStream;
 use url::{Host, Position, Url};
 
 pub use body::ResponseBody;
+pub use client_cert::{CertSpec, ClientCert};
+pub use proxy::ProxyConfig;
 use body::{Decoder, Sink};
 
 use crate::cookies::{self, SharedJar};
@@ -44,6 +50,9 @@ pub struct SendOptions {
     pub decompress: bool,
     /// Cookies to send and to keep from the responses, on every hop of redirects too.
     pub cookies: Option<SharedJar>,
+    pub proxy: ProxyConfig,
+    /// Client certificates by host, for servers that ask for one.
+    pub client_certs: Arc<Vec<ClientCert>>,
 }
 
 impl Default for SendOptions {
@@ -58,6 +67,8 @@ impl Default for SendOptions {
             spill_dir: std::env::temp_dir().join("tsubamedo"),
             decompress: true,
             cookies: None,
+            proxy: ProxyConfig::System,
+            client_certs: Arc::new(Vec::new()),
         }
     }
 }
@@ -106,9 +117,12 @@ fn ms_opt<S: Serializer>(d: &Option<Duration>, s: S) -> Result<S::Ok, S::Error> 
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TlsInfo {
     pub version: String,
     pub alpn: Option<String>,
+    /// The file of the client certificate offered to the server.
+    pub client_cert: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,6 +149,8 @@ pub struct Response {
     pub redirects: Vec<Redirect>,
     /// The `Cookie` header that went out with the request when the jar added to it.
     pub sent_cookie: Option<String>,
+    /// The proxy of the last hop.
+    pub via: Option<String>,
 }
 
 impl Response {
@@ -233,6 +249,7 @@ struct Hop {
     tls: Option<TlsInfo>,
     timings: Timings,
     headers_at: Instant,
+    via: Option<String>,
 }
 
 enum Sender {
@@ -244,27 +261,54 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
     let host = url.host().ok_or_else(|| Error::BadUrl { url: url.to_string(), reason: "нет имени сервера".into() })?;
     let host_name = url.host_str().unwrap_or_default().to_string();
     let port = url.port_or_known_default().unwrap_or(80);
+    let https = url.scheme() == "https";
+    let proxy = options.proxy.for_url(url).map_err(|reason| Error::Proxy { proxy: "из настроек".into(), reason })?;
+    let proxy_error = |p: &proxy::Proxy, reason: String| Error::Proxy { proxy: p.label(), reason };
     let mut timings = Timings::default();
 
+    // Where the connection goes: the server, or the proxy.
+    let (dial, dial_port) = match &proxy {
+        Some(p) => {
+            let name = if p.host.contains(':') { format!("[{}]", p.host) } else { p.host.clone() };
+            (Host::parse(&name).map_err(|e| proxy_error(p, e.to_string()))?, p.port)
+        }
+        None => (host.to_owned(), port),
+    };
     let t = Instant::now();
-    let addrs: Vec<SocketAddr> = match &host {
-        Host::Ipv4(ip) => vec![SocketAddr::new(IpAddr::V4(*ip), port)],
-        Host::Ipv6(ip) => vec![SocketAddr::new(IpAddr::V6(*ip), port)],
-        Host::Domain(domain) => tokio::net::lookup_host((*domain, port))
+    let addrs: Vec<SocketAddr> = match &dial {
+        Host::Ipv4(ip) => vec![SocketAddr::new(IpAddr::V4(*ip), dial_port)],
+        Host::Ipv6(ip) => vec![SocketAddr::new(IpAddr::V6(*ip), dial_port)],
+        Host::Domain(domain) => tokio::net::lookup_host((domain.as_str(), dial_port))
             .await
-            .map_err(|e| Error::Dns { host: domain.to_string(), reason: e.to_string() })?
+            .map_err(|e| match &proxy {
+                Some(p) => proxy_error(p, format!("адрес не найден: {e}")),
+                None => Error::Dns { host: domain.to_string(), reason: e.to_string() },
+            })?
             .collect(),
     };
     timings.dns = t.elapsed();
 
     let t = Instant::now();
-    let (tcp, remote_addr) = connect(&addrs, options.connect_timeout).await.map_err(|reason| Error::Connect {
-        target: format!("{host_name}:{port}"),
-        reason,
+    let (mut tcp, remote_addr) = connect(&addrs, options.connect_timeout).await.map_err(|reason| match &proxy {
+        Some(p) => proxy_error(p, format!("не подключиться: {reason}")),
+        None => Error::Connect { target: format!("{host_name}:{port}"), reason },
     })?;
+    // Plain HTTP through an HTTP proxy: the whole address goes in the request line.
+    let mut absolute = false;
+    if let Some(p) = &proxy {
+        let opened = if p.socks {
+            proxy::socks5(&mut tcp, &host_name, port, p).await
+        } else if https {
+            proxy::tunnel(&mut tcp, &format!("{host_name}:{port}"), p).await
+        } else {
+            absolute = true;
+            Ok(())
+        };
+        opened.map_err(|reason| proxy_error(p, reason))?;
+    }
     timings.connect = t.elapsed();
 
-    let (sender, tls) = if url.scheme() == "https" {
+    let (sender, tls) = if https {
         let t = Instant::now();
         let server_name = match &host {
             Host::Domain(d) => rustls::pki_types::ServerName::try_from(d.to_string())
@@ -272,10 +316,24 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
             Host::Ipv4(ip) => rustls::pki_types::ServerName::IpAddress(IpAddr::V4(*ip).into()),
             Host::Ipv6(ip) => rustls::pki_types::ServerName::IpAddress(IpAddr::V6(*ip).into()),
         };
-        let stream = tokio_rustls::TlsConnector::from(tls::config(options.verify_tls))
+        let cert = client_cert::find(&options.client_certs, &host_name, port);
+        let identity = match cert.map(|c| c.identity.clone()) {
+            Some(Ok(identity)) => Some(identity),
+            Some(Err(reason)) => return Err(Error::Tls { host: host_name.clone(), reason: format!("клиентский сертификат: {reason}") }),
+            None => None,
+        };
+        let config = tls::config(options.verify_tls, identity.as_deref()).map_err(|reason| Error::Tls { host: host_name.clone(), reason })?;
+        let stream = tokio_rustls::TlsConnector::from(config)
             .connect(server_name, tcp)
             .await
-            .map_err(|e| Error::Tls { host: host_name.clone(), reason: chain(&e) })?;
+            .map_err(|e| {
+                let mut reason = chain(&e);
+                // TLS 1.3 says so; TLS 1.2 servers often just break off.
+                if identity.is_none() && (reason.contains("CertificateRequired") || reason.contains("HandshakeFailure")) {
+                    reason.push_str(" — возможно, сервер ждёт клиентский сертификат (Настройки → Клиентские сертификаты, в CLI — --cert)");
+                }
+                Error::Tls { host: host_name.clone(), reason }
+            })?;
         timings.tls = Some(t.elapsed());
         let session = stream.get_ref().1;
         let alpn = session.alpn_protocol().map(|p| String::from_utf8_lossy(p).into_owned());
@@ -285,13 +343,14 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
             other => format!("{other:?}"),
         };
         let h2 = alpn.as_deref() == Some("h2");
-        (handshake(stream, h2).await?, Some(TlsInfo { version, alpn }))
+        let client_cert = identity.map(|i| i.label.clone());
+        (handshake(stream, h2).await?, Some(TlsInfo { version, alpn, client_cert }))
     } else {
         (handshake(tcp, false).await?, None)
     };
 
     let h2 = matches!(sender, Sender::H2(_));
-    let target = if h2 { &url[..Position::AfterQuery] } else { &url[Position::BeforePath..Position::AfterQuery] };
+    let target = if h2 || absolute { &url[..Position::AfterQuery] } else { &url[Position::BeforePath..Position::AfterQuery] };
     let http_method = http::Method::from_bytes(method.as_bytes()).map_err(|_| Error::Invalid(format!("неверный метод «{method}»")))?;
     let mut builder = hyper::Request::builder().method(http_method).uri(target);
     let has = |name: &str| headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(name));
@@ -313,6 +372,12 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
             .map_err(|_| Error::Invalid(format!("неверное значение заголовка {name}")))?;
         builder = builder.header(name, value);
     }
+    if absolute
+        && !has("proxy-authorization")
+        && let Some(auth) = proxy.as_ref().and_then(proxy::Proxy::authorization)
+    {
+        builder = builder.header(hyper::header::PROXY_AUTHORIZATION, auth);
+    }
     for (name, value) in [("user-agent", USER_AGENT), ("accept", "*/*"), ("accept-encoding", "gzip, deflate, br")] {
         if !has(name) && (name != "accept-encoding" || options.decompress) {
             builder = builder.header(name, value);
@@ -328,7 +393,8 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
     }
     .map_err(|e| Error::Http(chain(&e)))?;
     timings.wait = t.elapsed();
-    Ok(Hop { response, _sender: sender, remote_addr, tls, timings, headers_at: Instant::now() })
+    let via = proxy.as_ref().map(proxy::Proxy::label);
+    Ok(Hop { response, _sender: sender, remote_addr, tls, timings, headers_at: Instant::now(), via })
 }
 
 async fn connect(addrs: &[SocketAddr], limit: Duration) -> Result<(TcpStream, SocketAddr), String> {
@@ -367,7 +433,7 @@ where
 }
 
 async fn read(hop: Hop, url: Url, redirects: Vec<Redirect>, start: Instant, options: &SendOptions) -> Result<Response> {
-    let Hop { response, _sender, remote_addr, tls, mut timings, headers_at } = hop;
+    let Hop { response, _sender, remote_addr, tls, mut timings, headers_at, via } = hop;
     let (parts, mut incoming) = response.into_parts();
     let encoding = parts
         .headers
@@ -420,5 +486,6 @@ async fn read(hop: Hop, url: Url, redirects: Vec<Redirect>, start: Instant, opti
         tls,
         redirects,
         sent_cookie: None,
+        via,
     })
 }

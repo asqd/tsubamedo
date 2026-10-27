@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, CollectionInfo, emptyRequest, ImportPreview, Reorganized, Request } from "./api";
 import { CookiesDialog } from "./components/CookiesDialog";
 import { ImportDialog, ImportTarget } from "./components/ImportDialog";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { Logo } from "./components/Logo";
 import { RequestEditor } from "./components/RequestEditor";
 import { failedIds, RunPanel, RunSettings, RunState } from "./components/RunPanel";
@@ -71,6 +72,7 @@ export default function App() {
     }
   });
   const [cookiesOpen, setCookiesOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [importing, setImporting] = useState<{ path: string; preview: ImportPreview; busy: boolean } | null>(null);
 
   const tabsRef = useRef(tabs);
@@ -613,6 +615,9 @@ export default function App() {
           <button className="ghost small" onClick={() => setCookiesOpen(true)} title="Cookie, которые поставили серверы, — у каждого окружения свои">
             Cookie
           </button>
+          <button className="ghost small" onClick={() => setSettingsOpen(true)} title="Прокси и клиентские сертификаты">
+            Настройки
+          </button>
           <span className="faint small save-state">{saveState === "saving" ? "сохраняю…" : saveState === "saved" ? "сохранено" : ""}</span>
         </header>
         {problem && (
@@ -703,6 +708,7 @@ export default function App() {
           </div>
         )}
         {cookiesOpen && <CookiesDialog env={env} onClose={() => setCookiesOpen(false)} />}
+        {settingsOpen && <SettingsDialog collection={collection} env={env} onClose={() => setSettingsOpen(false)} />}
         {importing && (
           <ImportDialog
             path={importing.path}

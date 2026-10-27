@@ -129,9 +129,9 @@ fn postman_collection_with_inherited_auth_and_scripts() {
     let Body::Json { content } = &graphql.body else { panic!() };
     assert_eq!(serde_json::from_str::<Value>(content).unwrap(), serde_json::json!({"query": "query { me { id } }", "variables": {"a": 1}}));
     assert_eq!(find(&i, "XML").request.body, Body::Text { content: "<a/>".into(), content_type: Some("application/xml".into()) });
-    assert!(warned(&i, "digest"));
+    assert_eq!(graphql.auth, Auth::Digest { username: "кот".into(), password: "{{digest_password}}".into() });
     assert!(warned(&i, "{{$randomFirstName}}"));
-    assert!(warned(&i, "не заданы переменные: api_key"));
+    assert!(warned(&i, "не заданы переменные: api_key, digest_password"));
 }
 
 #[test]
@@ -286,6 +286,7 @@ fn openapi_schemas_check_real_answers() {
             tls: None,
             redirects: Vec::new(),
             sent_cookie: None,
+            via: None,
         };
         let out = run_checks(&entry.request.checks, &Answer::new(&r), &Vars::new(), Some(entry.dir()));
         (out[1].ok, out[1].error.clone().unwrap_or_default())

@@ -432,7 +432,7 @@ fn map_texts(request: &mut Request, mut f: impl FnMut(&str) -> String) {
     }
     match &mut request.auth {
         Auth::None => {}
-        Auth::Basic { username, password } => {
+        Auth::Basic { username, password } | Auth::Digest { username, password } => {
             *username = f(username);
             *password = f(password);
         }

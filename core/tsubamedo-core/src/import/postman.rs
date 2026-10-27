@@ -190,6 +190,7 @@ impl Converter {
             "noauth" | "" => Auth::None,
             "bearer" => Auth::Bearer { token: field("token") },
             "basic" => Auth::Basic { username: field("username"), password: field("password") },
+            "digest" => Auth::Digest { username: field("username"), password: field("password") },
             "apikey" => Auth::ApiKey {
                 key: field("key"),
                 value: field("value"),

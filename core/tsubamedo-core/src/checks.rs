@@ -547,6 +547,7 @@ mod tests {
             tls: None,
             redirects: Vec::new(),
             sent_cookie: None,
+            via: None,
         }
     }
 

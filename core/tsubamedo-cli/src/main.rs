@@ -5,11 +5,12 @@ mod format;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::{Args, Parser, Subcommand};
 use tsubamedo_core::collection::{Collection, MANIFEST};
-use tsubamedo_core::http::{Response, SendOptions};
+use tsubamedo_core::http::{CertSpec, ClientCert, ProxyConfig, Response, SendOptions};
 use tsubamedo_core::prepare::prepare;
 use tsubamedo_core::request_file::RequestFile;
 use tsubamedo_core::run::{Event, Exchange, RunOptions, Runner};
@@ -67,6 +68,23 @@ struct Common {
     /// Не отправлять cookie, которые поставил сервер (по умолчанию они живут, пока идёт команда).
     #[arg(long)]
     no_cookies: bool,
+    /// Прокси: proxy:3128, http://логин:пароль@proxy:3128, socks5://proxy:1080. Без него —
+    /// HTTPS_PROXY и подобные, а в macOS — системные настройки.
+    #[arg(short = 'x', long, value_name = "АДРЕС")]
+    proxy: Option<String>,
+    /// Куда идти без прокси: .corp.local,10.0.0.0/8; '*' — никуда через прокси.
+    #[arg(long, value_name = "СПИСОК")]
+    noproxy: Option<String>,
+    /// Клиентский сертификат: PEM (ключ в нём же или в --key) или .p12/.pfx. Для всех
+    /// серверов; по серверам — [[certificates]] в tsubamedo.toml.
+    #[arg(short = 'E', long, value_name = "ФАЙЛ")]
+    cert: Option<String>,
+    /// Закрытый ключ сертификата, если он в отдельном файле.
+    #[arg(long, value_name = "ФАЙЛ")]
+    key: Option<String>,
+    /// Пароль .p12 или зашифрованного ключа.
+    #[arg(long = "pass", value_name = "ПАРОЛЬ")]
+    cert_pass: Option<String>,
 }
 
 #[derive(Args)]
@@ -176,6 +194,26 @@ fn send_options(common: &Common) -> SendOptions {
         timeout: common.max_time.map(Duration::from_secs_f64),
         // One jar for the whole command: a login in `run` serves the requests after it.
         cookies: (!common.no_cookies).then(|| tsubamedo_core::cookies::Jar::default().shared()),
+        proxy: match (&common.proxy, common.noproxy.as_deref()) {
+            (_, Some("*")) => ProxyConfig::None,
+            (Some(url), no_proxy) => ProxyConfig::Custom { url: url.clone(), no_proxy: no_proxy.unwrap_or_default().to_string() },
+            (None, _) => ProxyConfig::System,
+        },
+        client_certs: Arc::new(
+            common
+                .cert
+                .iter()
+                .map(|cert| {
+                    let spec = CertSpec {
+                        host: "*".into(),
+                        cert: cert.clone(),
+                        key: common.key.clone().unwrap_or_default(),
+                        passphrase: common.cert_pass.clone().unwrap_or_default(),
+                    };
+                    ClientCert::load(&spec, Path::new("."))
+                })
+                .collect(),
+        ),
         ..SendOptions::default()
     }
 }
@@ -321,6 +359,12 @@ fn print_head(r: &Response, include: bool) {
         body.push_str(&format!(" (по сети {})", size(r.wire_size)));
     }
     parts.push(body);
+    if let Some(via) = &r.via {
+        parts.push(format!("через прокси {via}"));
+    }
+    if let Some(cert) = r.tls.as_ref().and_then(|t| t.client_cert.as_ref()) {
+        parts.push(format!("сертификат {cert}"));
+    }
     let _ = writeln!(err, "{}", paint.dim(&parts.join(" · ")));
 }
 

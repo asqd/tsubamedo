@@ -203,7 +203,7 @@
         "method": "POST",
         "auth": {
           "type": "digest",
-          "digest": []
+          "digest": [ { "key": "username", "value": "кот" }, { "key": "password", "value": "{{digest_password}}" } ]
         },
         "body": {
           "mode": "graphql",

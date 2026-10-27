@@ -91,6 +91,8 @@ pub enum Auth {
     Bearer { token: String },
     #[serde(rename = "apikey")]
     ApiKey { key: String, value: String, location: ApiKeyLocation },
+    /// Answered after the server's 401 challenge; see [`crate::digest`].
+    Digest { username: String, password: String },
     /// The token is got and renewed on its own; see [`crate::oauth`].
     #[serde(rename = "oauth2")]
     OAuth2(OAuth2),

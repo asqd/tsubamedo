@@ -211,6 +211,7 @@ function AuthEditor({ request, env, sending, onChange }: { request: Request; env
       none: { type: "none" },
       basic: { type: "basic", username: "", password: "" },
       bearer: { type: "bearer", token: "" },
+      digest: { type: "digest", username: "", password: "" },
       apikey: { type: "apikey", key: "X-Api-Key", value: "", location: "header" },
       oauth2: freshOAuth(),
     };
@@ -224,13 +225,14 @@ function AuthEditor({ request, env, sending, onChange }: { request: Request; env
           <option value="none">Нет</option>
           <option value="bearer">Bearer-токен</option>
           <option value="basic">Basic: логин и пароль</option>
+          <option value="digest">Digest: логин и пароль</option>
           <option value="apikey">API key</option>
           <option value="oauth2">OAuth 2.0</option>
         </select>
       </label>
       {auth.type === "oauth2" && <OAuthEditor auth={auth} request={request} env={env} sending={sending} onChange={onChange} />}
       {auth.type === "bearer" && <Field label="Токен" value={auth.token} onChange={(token) => onChange({ ...auth, token })} placeholder="{{token}}" />}
-      {auth.type === "basic" && (
+      {(auth.type === "basic" || auth.type === "digest") && (
         <>
           <Field label="Логин" value={auth.username} onChange={(username) => onChange({ ...auth, username })} />
           <Field label="Пароль" value={auth.password} onChange={(password) => onChange({ ...auth, password })} placeholder="{{password}}" />
@@ -248,6 +250,9 @@ function AuthEditor({ request, env, sending, onChange }: { request: Request; env
             </select>
           </label>
         </>
+      )}
+      {auth.type === "digest" && (
+        <div className="hint">Запрос уходит без авторизации, сервер отвечает 401 с вызовом Digest, и запрос уходит ещё раз с ответом на него (MD5 или SHA-256).</div>
       )}
       {auth.type !== "none" && auth.type !== "oauth2" && <div className="hint">Секреты лучше держать в переменных из файла *.local.toml — он не попадает в git.</div>}
     </div>

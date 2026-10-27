@@ -326,3 +326,31 @@ async fn cookies_and_tokens_last_between_starts() {
     call(&s, "oauthForget", json!({ "request": request, "env": null })).await;
     assert_eq!(call(&s, "oauthStatus", json!({ "request": request, "env": null })).await, Value::Null);
 }
+
+#[tokio::test]
+async fn proxy_settings_and_certificates() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("tsubamedo.toml"), "name = \"Банк\"\n\n[vars]\nbase = \"https://api.bank.test\"\n").unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let s = Session::with_data_dir(data.path().to_path_buf());
+    call(&s, "openCollection", json!({ "path": dir.path() })).await;
+
+    assert_eq!(call(&s, "proxySettings", json!({})).await["proxy"], json!({ "mode": "system" }));
+    let bad = s.clone().call("saveProxy", json!({ "proxy": { "mode": "custom", "url": "ftp://x" } })).await;
+    assert!(bad.unwrap_err().contains("схема ftp"));
+    call(&s, "saveProxy", json!({ "proxy": { "mode": "custom", "url": "proxy.corp:3128", "noProxy": ".corp" } })).await;
+    let again = Session::with_data_dir(data.path().to_path_buf());
+    assert_eq!(call(&again, "proxySettings", json!({})).await["proxy"], json!({ "mode": "custom", "url": "proxy.corp:3128", "noProxy": ".corp" }));
+
+    let certs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tsubamedo-core/tests/certs");
+    let list = json!([
+        { "host": "api.bank.test", "cert": certs.join("client.pem"), "key": certs.join("client.key") },
+        { "host": "*.partner.test", "cert": certs.join("client.p12"), "passphrase": "{{cert_password}}" },
+    ]);
+    let saved = call(&s, "saveCertificates", json!({ "env": null, "certificates": list })).await;
+    assert_eq!(saved[0]["status"], json!({ "ok": true, "text": "client.pem: сертификатов в цепочке 1" }), "{saved}");
+    assert_eq!(saved[1]["status"], json!({ "ok": false, "text": "не заданы переменные: cert_password" }));
+    let manifest = std::fs::read_to_string(dir.path().join("tsubamedo.toml")).unwrap();
+    assert!(manifest.starts_with("name = \"Банк\"\n\n[vars]\nbase = \"https://api.bank.test\"\n\n[[certificates]]\nhost = \"api.bank.test\"\n"), "{manifest}");
+    assert!(!manifest.contains("key = \"\"") && manifest.contains("passphrase = \"{{cert_password}}\""), "{manifest}");
+}

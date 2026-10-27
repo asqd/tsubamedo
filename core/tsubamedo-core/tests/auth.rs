@@ -42,7 +42,7 @@ fn reply(status: u16, headers: &[(&str, &str)], body: &str) -> hyper::Response<F
 async fn handle(s: Arc<Server>, req: hyper::Request<Incoming>) -> Result<hyper::Response<Full<Bytes>>, Infallible> {
     let path = req.uri().path().to_string();
     let query: HashMap<String, String> = url::form_urlencoded::parse(req.uri().query().unwrap_or_default().as_bytes()).into_owned().collect();
-    let header = |name: &str| req.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+    let header = |name: &str| req.headers().get(name).map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned()).unwrap_or_default();
     let (cookie, authorization) = (header("cookie"), header("authorization"));
     let body = req.into_body().collect().await.unwrap().to_bytes();
     let form: HashMap<String, String> = url::form_urlencoded::parse(&body).into_owned().collect();
@@ -81,6 +81,16 @@ async fn handle(s: Arc<Server>, req: hyper::Request<Incoming>) -> Result<hyper::
             let token = format!("a-{issued}");
             s.valid.lock().unwrap().push(token.clone());
             reply(200, &[], &format!(r#"{{"access_token": "{token}", "token_type": "bearer", "expires_in": 3600, "refresh_token": "r-1"}}"#))
+        }
+        "/digest" => {
+            const CHALLENGE: &str = r#"Digest realm="api", qop="auth", algorithm=SHA-256, nonce="n-1", opaque="o""#;
+            let cnonce = authorization.split("cnonce=\"").nth(1).and_then(|r| r.split('"').next()).unwrap_or_default();
+            let want = tsubamedo_core::digest::answer(CHALLENGE, "GET", "/digest?x=1", b"", "кот", "мяу", cnonce).unwrap();
+            if authorization == want {
+                reply(200, &[], r#"{"ok": true}"#)
+            } else {
+                reply(401, &[("www-authenticate", "Basic realm=\"api\""), ("www-authenticate", CHALLENGE)], "")
+            }
         }
         "/api" if s.valid.lock().unwrap().iter().any(|t| authorization == format!("Bearer {t}")) => reply(200, &[], r#"{"ok": true}"#),
         _ => reply(401, &[], r#"{"error": "invalid_token"}"#),
@@ -186,4 +196,18 @@ async fn sign_in_in_the_browser_with_pkce() {
     assert_eq!(ex.result.as_ref().map(|r| r.status).map_err(|e| e.to_string()), Ok(200), "{:?}", ex.logs);
     assert_eq!(ex.logs, ["OAuth 2.0: получен новый токен (вход в браузере), действует 60 мин"]);
     assert_eq!(*s.grants.lock().unwrap(), ["authorization_code"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn digest_answers_the_challenge() {
+    let (addr, _) = server().await;
+    let mut r = runner(SendOptions::default());
+    let auth = Auth::Digest { username: "кот".into(), password: "мяу".into() };
+    let ex = r.send(None, &get(format!("http://{addr}/digest?x=1"), auth), Path::new(".")).await.pop().unwrap();
+    assert_eq!(ex.result.as_ref().unwrap().status, 200, "{:?}", ex.logs);
+    assert!(ex.sent.unwrap().header("authorization").unwrap().starts_with(r#"Digest username="кот", realm="api", nonce="n-1", uri="/digest?x=1", algorithm=SHA-256"#));
+
+    let wrong = Auth::Digest { username: "кот".into(), password: "гав".into() };
+    let ex = r.send(None, &get(format!("http://{addr}/digest?x=1"), wrong), Path::new(".")).await.pop().unwrap();
+    assert_eq!(ex.result.unwrap().status, 401, "a wrong password is the server's 401, sent once more only");
 }

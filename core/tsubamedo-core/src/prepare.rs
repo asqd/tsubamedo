@@ -22,6 +22,8 @@ pub struct Prepared {
     pub options: RequestOptions,
     /// OAuth 2.0 with variables substituted: the sender gets the token and adds it.
     pub oauth: Option<OAuth2>,
+    /// Digest login and password: the sender answers the server's challenge with them.
+    pub digest: Option<(String, String)>,
 }
 
 impl Prepared {
@@ -37,6 +39,7 @@ pub fn prepare(request: &Request, vars: &Vars, base_dir: &Path) -> Result<Prepar
     let mut query = render_pairs(&mut r, &request.query);
     let mut headers = render_pairs(&mut r, &request.headers);
     let mut oauth = None;
+    let mut digest = None;
 
     match &request.auth {
         Auth::None => {}
@@ -53,6 +56,7 @@ pub fn prepare(request: &Request, vars: &Vars, base_dir: &Path) -> Result<Prepar
                 ApiKeyLocation::Query => query.push(pair),
             }
         }
+        Auth::Digest { username, password } => digest = Some((r.render(username), r.render(password))),
         Auth::OAuth2(o) => {
             let mut o = o.clone();
             for field in oauth_fields(&mut o) {
@@ -114,7 +118,7 @@ pub fn prepare(request: &Request, vars: &Vars, base_dir: &Path) -> Result<Prepar
     if method.is_empty() || !method.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.!#$%&'*+^`|~".contains(&b)) {
         return Err(Error::Invalid(format!("неверный метод «{method}»")));
     }
-    Ok(Prepared { method, url, headers, body, options: request.options.clone(), oauth })
+    Ok(Prepared { method, url, headers, body, options: request.options.clone(), oauth, digest })
 }
 
 /// Variables a request refers to, with those inside the values of other variables: what it
@@ -129,7 +133,7 @@ pub fn variables(request: &Request, vars: &Vars) -> BTreeSet<String> {
     texts.extend(pairs(&request.headers));
     match &request.auth {
         Auth::None => {}
-        Auth::Basic { username, password } => texts.extend([username.as_str(), password]),
+        Auth::Basic { username, password } | Auth::Digest { username, password } => texts.extend([username.as_str(), password]),
         Auth::Bearer { token } => texts.push(token),
         Auth::ApiKey { key, value, .. } => texts.extend([key.as_str(), value]),
         Auth::OAuth2(o) => texts.extend([

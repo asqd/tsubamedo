@@ -223,17 +223,26 @@ function TimingChart({ meta }: { meta: ResponseMeta }) {
             <td className="k">Адрес</td>
             <td className="mono sel">{meta.url}</td>
           </tr>
-          <tr>
-            <td className="k">Сервер</td>
-            <td className="mono sel">{meta.remoteAddr}</td>
-          </tr>
+          {!meta.via && (
+            <tr>
+              <td className="k">Сервер</td>
+              <td className="mono sel">{meta.remoteAddr}</td>
+            </tr>
+          )}
           {meta.tls && (
             <tr>
               <td className="k">TLS</td>
               <td className="mono">
                 {meta.tls.version}
                 {meta.tls.alpn ? ` · ${meta.tls.alpn}` : ""}
+                {meta.tls.clientCert ? ` · клиентский сертификат ${meta.tls.clientCert}` : ""}
               </td>
+            </tr>
+          )}
+          {meta.via && (
+            <tr>
+              <td className="k">Прокси</td>
+              <td className="mono sel">{meta.via}</td>
             </tr>
           )}
           {meta.redirects.map((r, i) => (

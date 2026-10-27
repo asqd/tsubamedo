@@ -21,6 +21,8 @@ pub enum Error {
     Dns { host: String, reason: String },
     #[error("не удалось подключиться к {target}: {reason}")]
     Connect { target: String, reason: String },
+    #[error("прокси {proxy}: {reason}")]
+    Proxy { proxy: String, reason: String },
     #[error("TLS с {host}: {reason}")]
     Tls { host: String, reason: String },
     #[error("ответ не пришёл за {0} мс")]

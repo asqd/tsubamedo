@@ -20,6 +20,7 @@ fn response(status: u16, body: &str) -> Response {
         tls: None,
         redirects: Vec::new(),
         sent_cookie: None,
+        via: None,
     }
 }
 

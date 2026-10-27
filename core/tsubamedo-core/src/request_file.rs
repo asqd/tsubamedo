@@ -14,7 +14,7 @@
 //! X-Tag = ["a", "b"]            # the same header twice
 //!
 //! [auth]
-//! type = "bearer"               # basic: username, password; apikey: key, value, in
+//! type = "bearer"               # basic, digest: username, password; apikey: key, value, in
 //! token = "{{token}}"
 //!
 //! # or OAuth 2.0: the token is got, kept and renewed by the app
@@ -303,6 +303,7 @@ fn parse_auth(item: Option<&Item>) -> Result<Auth, String> {
         None | Some("none") => Auth::None,
         Some("basic") => Auth::Basic { username: field("username")?, password: field("password")? },
         Some("bearer") => Auth::Bearer { token: field("token")? },
+        Some("digest") => Auth::Digest { username: field("username")?, password: field("password")? },
         Some("apikey") => Auth::ApiKey {
             key: field("key")?,
             value: field("value")?,
@@ -565,6 +566,9 @@ fn sync_auth(root: &mut Item, auth: &Auth) {
         }
         Auth::Bearer { token } => {
             sync_section(root, "auth", KNOWN, &[("type", Some("bearer")), ("token", Some(token))]);
+        }
+        Auth::Digest { username, password } => {
+            sync_section(root, "auth", KNOWN, &[("type", Some("digest")), ("username", Some(username)), ("password", Some(password))]);
         }
         Auth::ApiKey { key, value, location } => {
             let location = match location {

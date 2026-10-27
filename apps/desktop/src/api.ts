@@ -20,6 +20,7 @@ export type Auth =
   | { type: "none" }
   | { type: "basic"; username: string; password: string }
   | { type: "bearer"; token: string }
+  | { type: "digest"; username: string; password: string }
   | { type: "apikey"; key: string; value: string; location: "header" | "query" }
   | ({ type: "oauth2" } & OAuth2);
 
@@ -47,6 +48,33 @@ export interface TokenInfo {
   expiresAt: number | null;
   hasRefresh: boolean;
   scope: string | null;
+}
+
+export type ProxyConfig = { mode: "system" } | { mode: "none" } | { mode: "custom"; url: string; noProxy: string };
+
+/** What the system says about proxies: environment variables or the macOS settings. */
+export interface SystemProxy {
+  source: string;
+  http: string | null;
+  https: string | null;
+  socks: string | null;
+  bypass: string[];
+  simpleDirect: boolean;
+  pac: string | null;
+}
+
+/** A client certificate of the collection, as written in tsubamedo.toml. */
+export interface CertSpec {
+  host: string;
+  cert: string;
+  key: string;
+  passphrase: string;
+}
+
+export interface CertEntry {
+  spec: CertSpec;
+  /** Whether it reads in the open environment, and what it is or why not. */
+  status: { ok: boolean; text: string };
 }
 
 export interface Cookie {
@@ -139,8 +167,10 @@ export interface ResponseMeta {
   timings: Timings;
   url: string;
   remoteAddr: string;
-  tls: { version: string; alpn: string | null } | null;
+  tls: { version: string; alpn: string | null; clientCert?: string | null } | null;
   redirects: { status: number; url: string }[];
+  /** The proxy it went through; absent in older history entries. */
+  via?: string | null;
   isJson: boolean;
   contentType: string | null;
   receivedAt: number;
@@ -337,6 +367,10 @@ export const api = {
     call<{ steps: RunStep[]; results: RunResult[]; totalMs: number }>("runCollection", { sendId, folder, env, parallel, retries, only }),
   /** What a run has done so far; null once it is over. */
   runProgress: (sendId: string) => call<RunProgress | null>("runProgress", { sendId }),
+  proxySettings: () => call<{ proxy: ProxyConfig; system: SystemProxy }>("proxySettings"),
+  saveProxy: (proxy: ProxyConfig) => call<null>("saveProxy", { proxy }),
+  certificates: (env: string | null) => call<CertEntry[]>("certificates", { env }),
+  saveCertificates: (env: string | null, certificates: CertSpec[]) => call<CertEntry[]>("saveCertificates", { env, certificates }),
   cookies: (env: string | null) => call<Cookie[]>("cookies", { env }),
   deleteCookie: (env: string | null, c: Cookie) => call<null>("deleteCookie", { env, domain: c.domain, path: c.path, name: c.name }),
   clearCookies: (env: string | null) => call<null>("clearCookies", { env }),

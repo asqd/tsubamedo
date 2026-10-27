@@ -245,6 +245,7 @@ impl Converter {
                 }
             }
             "basic" => Auth::Basic { username: str_at(a, "username").into(), password: str_at(a, "password").into() },
+            "digest" => Auth::Digest { username: str_at(a, "username").into(), password: str_at(a, "password").into() },
             "apikey" => Auth::ApiKey {
                 key: str_at(a, "key").into(),
                 value: str_at(a, "value").into(),

@@ -6,6 +6,7 @@
 //! - [`organize`] — renaming, moving and deleting requests and folders (to the Trash).
 //! - [`collection`] — a folder of request files, environments and their variables.
 //! - [`cookies`] — what servers set, sent back like a browser does, a jar per environment.
+//! - [`digest`] — Digest authentication, answered after the server's challenge.
 //! - [`oauth`] — OAuth 2.0 tokens: got in the browser or directly, kept and renewed.
 //! - [`prepare`] — variables substituted, auth and body turned into bytes and headers.
 //! - [`http`] — sending with a time for every phase; big bodies go to a temporary file.
@@ -20,6 +21,7 @@ pub mod checks;
 pub mod collection;
 pub mod cookies;
 pub mod curl;
+pub mod digest;
 pub mod error;
 pub mod http;
 pub mod import;

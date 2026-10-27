@@ -9,14 +9,18 @@
 //!   orders/01-create.toml   requests; folders group them, names sort them
 //! ```
 //!
+//! `tsubamedo.toml` may also list client certificates by host (`[[certificates]]`, see
+//! [`crate::http::client_cert`]).
+//!
 //! Variables, from weakest to strongest: collection, collection local, environment,
 //! environment local, then whatever the caller passes (`--var` in the CLI).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use toml_edit::{DocumentMut, Item};
+use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 
+use crate::http::CertSpec;
 use crate::request_file::RequestFile;
 use crate::template::Vars;
 use crate::{Error, Request, Result};
@@ -149,6 +153,58 @@ impl Collection {
         }
         out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
+    }
+
+    /// Client certificates as written, `{{variables}}` and all.
+    pub fn certificates(&self) -> Result<Vec<CertSpec>> {
+        let path = self.root.join(MANIFEST);
+        let doc = read_doc(&path)?;
+        let Some(item) = doc.get("certificates") else { return Ok(Vec::new()) };
+        let bad = |message: String| Error::Parse { path: path.clone(), message };
+        let tables: Vec<&dyn toml_edit::TableLike> = match item {
+            Item::ArrayOfTables(a) => a.iter().map(|t| t as &dyn toml_edit::TableLike).collect(),
+            Item::Value(toml_edit::Value::Array(a)) => a
+                .iter()
+                .map(|v| v.as_inline_table().map(|t| t as &dyn toml_edit::TableLike))
+                .collect::<Option<_>>()
+                .ok_or_else(|| bad("certificates: нужны таблицы [[certificates]]".into()))?,
+            _ => return Err(bad("certificates: нужны таблицы [[certificates]]".into())),
+        };
+        tables
+            .into_iter()
+            .map(|t| {
+                let field = |key: &str| match t.get(key) {
+                    None => Ok(String::new()),
+                    Some(v) => v.as_str().map(str::to_string).ok_or_else(|| bad(format!("certificates.{key}: нужна строка"))),
+                };
+                let spec = CertSpec { host: field("host")?, cert: field("cert")?, key: field("key")?, passphrase: field("passphrase")? };
+                if spec.host.trim().is_empty() {
+                    return Err(bad("certificates: у сертификата нет host".into()));
+                }
+                Ok(spec)
+            })
+            .collect()
+    }
+
+    /// Writes `[[certificates]]`, leaving the rest of `tsubamedo.toml` as it was.
+    pub fn save_certificates(&self, list: &[CertSpec]) -> Result<()> {
+        let path = self.root.join(MANIFEST);
+        let mut doc = read_doc(&path)?;
+        doc.remove("certificates");
+        if !list.is_empty() {
+            let mut tables = ArrayOfTables::new();
+            for c in list {
+                let mut t = Table::new();
+                for (key, value) in [("host", &c.host), ("cert", &c.cert), ("key", &c.key), ("passphrase", &c.passphrase)] {
+                    if !value.trim().is_empty() || key == "host" || key == "cert" {
+                        t.insert(key, toml_edit::value(value.trim()));
+                    }
+                }
+                tables.push(t);
+            }
+            doc.insert("certificates", Item::ArrayOfTables(tables));
+        }
+        fs::write(&path, doc.to_string()).map_err(|e| Error::io(&path, e))
     }
 
     pub fn find(&self, id: &str) -> Option<&Entry> {

@@ -37,6 +37,16 @@ export async function pickParentFolder(): Promise<string | null> {
   return typeof picked === "string" ? picked : null;
 }
 
+/** A client certificate or its key. */
+export async function pickCertFile(title: string): Promise<string | null> {
+  if (inBridge) return prompt(`${title} (в мосте путь вводится вручную)`);
+  const picked = await open({
+    title,
+    filters: [{ name: "Сертификаты и ключи", extensions: ["pem", "crt", "cer", "key", "p12", "pfx"] }],
+  });
+  return typeof picked === "string" ? picked : null;
+}
+
 export async function pickSavePath(name: string): Promise<string | null> {
   if (inBridge) return prompt("Куда сохранить", `/tmp/${name}`);
   return save({ defaultPath: name, title: "Сохранить ответ" });

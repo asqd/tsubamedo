@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use tokio::task::AbortHandle;
 use tsubamedo_core::checks::{CheckResult, Captured};
 use tsubamedo_core::collection::{Collection, VarSource};
-use tsubamedo_core::run::{self, Exchange, Runner};
+use tsubamedo_core::run::{self, Event, Exchange, RunOptions, Runner};
 use tsubamedo_core::http::{Redirect, Response, ResponseBody, SendOptions, Timings, TlsInfo};
 use tsubamedo_core::organize;
 use tsubamedo_core::prepare::prepare;
@@ -34,6 +34,8 @@ const TEXT_LIMIT: u64 = 20 << 20;
 pub struct Session {
     state: Mutex<State>,
     sends: Mutex<HashMap<String, AbortHandle>>,
+    /// Collection runs in progress, by send id: what the window shows while they go.
+    runs: Mutex<HashMap<String, Value>>,
     /// Where history is kept; without it nothing is remembered between runs.
     data_dir: Option<PathBuf>,
 }
@@ -161,6 +163,10 @@ impl Session {
             "createRequest" => self.create_request(args(a)?),
             "send" => self.send(args(a)?).await,
             "runCollection" => self.run_collection(args(a)?).await,
+            "runProgress" => {
+                let id = args::<SendIdArg>(a)?.send_id;
+                Ok(self.runs.lock().unwrap().get(&id).cloned().unwrap_or(Value::Null))
+            }
             "validateCheck" => Ok(match tsubamedo_core::checks::validate(&args::<TextArg>(a)?.text) {
                 Ok(()) => Value::Null,
                 Err(e) => Value::String(e),
@@ -534,51 +540,71 @@ impl Session {
     }
 
     /// Runs the collection or one folder of it, each request after those it takes values from.
+    /// Runs requests of the collection; `runProgress` shows them as they go.
     async fn run_collection(self: Arc<Self>, a: RunArg) -> Reply {
         let mut runner = self.runner(a.env.as_deref(), a.insecure)?;
-        let plan: Vec<(String, Request, PathBuf)> = {
+        let steps = {
             let state = self.state.lock().unwrap();
             let collection = state.collection()?;
-            let inside = |id: &str| a.folder.as_deref().is_none_or(|f| f.is_empty() || id.starts_with(&format!("{f}/")));
-            runner.order(collection, |e| inside(&e.id)).into_iter().map(|e| (e.id.clone(), e.request.clone(), e.dir().to_path_buf())).collect()
-        };
-        let started = std::time::Instant::now();
-        let task = tokio::spawn(async move {
-            let mut all = Vec::new();
-            for (id, request, dir) in plan {
-                all.extend(runner.send(Some(&id), &request, &dir).await);
+            match &a.only {
+                Some(ids) => runner.plan_only(collection, ids),
+                None => {
+                    let inside = |id: &str| a.folder.as_deref().is_none_or(|f| f.is_empty() || id.starts_with(&format!("{f}/")));
+                    runner.plan(collection, |e| inside(&e.id))
+                }
             }
-            all
+        };
+        let planned: Vec<Value> = steps
+            .iter()
+            .map(|s| json!({ "id": s.id, "method": s.request.method.to_ascii_uppercase(), "name": s.request.name }))
+            .collect();
+        let send_id = a.send_id.clone();
+        self.runs.lock().unwrap().insert(send_id.clone(), json!({ "steps": planned, "running": {}, "results": [], "done": false }));
+        let options = RunOptions { parallel: a.parallel.unwrap_or(1), retries: a.retries, ..RunOptions::default() };
+        let started = std::time::Instant::now();
+        let session = self.clone();
+        let env = a.env.clone();
+        let task = tokio::spawn(async move {
+            runner
+                .run(&steps, &options, |event| {
+                    let mut runs = session.runs.lock().unwrap();
+                    let Some(progress) = runs.get_mut(&send_id) else { return };
+                    match event {
+                        Event::Started { step, attempt } => progress["running"][step.to_string()] = json!(attempt),
+                        Event::Finished { step, attempts, exchanges, .. } => {
+                            if let Some(running) = progress["running"].as_object_mut() {
+                                running.remove(&step.to_string());
+                            }
+                            let last = exchanges.len().saturating_sub(1);
+                            for (i, ex) in exchanges.iter().enumerate() {
+                                let mut result = run_result(ex);
+                                // Requests sent first for missing values have no step of their own.
+                                result["step"] = if i == last { json!(step) } else { Value::Null };
+                                result["attempts"] = json!(if i == last { attempts } else { 1 });
+                                if let Some(results) = progress["results"].as_array_mut() {
+                                    results.push(result);
+                                }
+                            }
+                            drop(runs);
+                            session.keep_captured(env.as_deref(), &exchanges);
+                            for ex in &exchanges {
+                                session.record_exchange(ex, env.as_deref(), None);
+                            }
+                        }
+                    }
+                })
+                .await;
         });
         self.sends.lock().unwrap().insert(a.send_id.clone(), task.abort_handle());
         let result = task.await;
         self.sends.lock().unwrap().remove(&a.send_id);
-        let exchanges = match result {
-            Ok(exchanges) => exchanges,
+        let progress = self.runs.lock().unwrap().remove(&a.send_id).unwrap_or(Value::Null);
+        match result {
+            Ok(()) => {}
             Err(e) if e.is_cancelled() => return Err("Отменено".into()),
             Err(e) => return Err(e.to_string()),
-        };
-        self.keep_captured(a.env.as_deref(), &exchanges);
-        let results: Vec<Value> = exchanges
-            .iter()
-            .map(|ex| {
-                self.record_exchange(ex, a.env.as_deref(), None);
-                let response = ex.result.as_ref().ok();
-                json!({
-                    "id": ex.id,
-                    "method": ex.request.method.to_ascii_uppercase(),
-                    "status": response.map(|r| r.status),
-                    "totalMs": response.map(|r| r.timings.total.as_secs_f64() * 1000.0),
-                    "size": response.map(|r| r.body.len()),
-                    "passed": ex.passed(),
-                    "failures": ex.failures(),
-                    "checks": ex.checks.len(),
-                    "checksPassed": ex.checks.iter().filter(|c| c.ok).count(),
-                    "logs": ex.logs,
-                })
-            })
-            .collect();
-        Ok(json!({ "results": results, "totalMs": started.elapsed().as_secs_f64() * 1000.0 }))
+        }
+        Ok(json!({ "steps": progress["steps"], "results": progress["results"], "totalMs": started.elapsed().as_secs_f64() * 1000.0 }))
     }
 
     async fn view(self: Arc<Self>, a: ViewArg) -> Reply {
@@ -796,6 +822,23 @@ struct EnvArg {
     env: Option<String>,
 }
 
+/// A request of a run as the window lists it.
+fn run_result(ex: &Exchange) -> Value {
+    let response = ex.result.as_ref().ok();
+    json!({
+        "id": ex.id,
+        "method": ex.request.method.to_ascii_uppercase(),
+        "status": response.map(|r| r.status),
+        "totalMs": response.map(|r| r.timings.total.as_secs_f64() * 1000.0),
+        "size": response.map(|r| r.body.len()),
+        "passed": ex.passed(),
+        "failures": ex.failures(),
+        "checks": ex.checks.len(),
+        "checksPassed": ex.checks.iter().filter(|c| c.ok).count(),
+        "logs": ex.logs,
+    })
+}
+
 #[derive(Deserialize)]
 struct ImportArg {
     path: String,
@@ -856,6 +899,13 @@ struct RunArg {
     env: Option<String>,
     #[serde(default)]
     insecure: bool,
+    /// Requests in flight at once; 1 when not given.
+    parallel: Option<usize>,
+    /// How many times a failed request is sent again.
+    #[serde(default)]
+    retries: u32,
+    /// Only these requests (to send again what failed); `folder` is ignored then.
+    only: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]

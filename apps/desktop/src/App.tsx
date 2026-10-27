@@ -5,7 +5,7 @@ import { api, CollectionInfo, emptyRequest, ImportPreview, Reorganized, Request 
 import { ImportDialog, ImportTarget } from "./components/ImportDialog";
 import { Logo } from "./components/Logo";
 import { RequestEditor } from "./components/RequestEditor";
-import { RunPanel, RunState } from "./components/RunPanel";
+import { failedIds, RunPanel, RunSettings, RunState } from "./components/RunPanel";
 import { ResponsePane } from "./components/ResponsePane";
 import { Kind, TreeOps } from "./components/RequestTree";
 import { Sidebar } from "./components/Sidebar";
@@ -62,6 +62,13 @@ export default function App() {
   const [historyVersion, setHistoryVersion] = useState(0);
   const [renameTarget, setRenameTarget] = useState<{ kind: Kind; path: string; n: number } | null>(null);
   const [run, setRun] = useState<RunState | null>(null);
+  const [runSettings, setRunSettings] = useState<RunSettings>(() => {
+    try {
+      return { parallel: 1, retries: 0, ...JSON.parse(store.get("run") ?? "{}") };
+    } catch {
+      return { parallel: 1, retries: 0 };
+    }
+  });
   const [importing, setImporting] = useState<{ path: string; preview: ImportPreview; busy: boolean } | null>(null);
 
   const tabsRef = useRef(tabs);
@@ -282,23 +289,33 @@ export default function App() {
     loadVars();
   }, [active, flushSave, patchTab, env, loadVars]);
 
-  /** Runs the collection (`folder` empty) or a folder in the panel over the editors. */
+  /** Runs the collection (`folder` empty), a folder, or `only` these requests, in the panel
+   * over the editors; the panel follows the run as it goes. */
   const startRun = useCallback(
-    async (folder: string) => {
+    async (folder: string, only: string[] | null = null) => {
       await flushSave();
       const sendId = crypto.randomUUID();
-      setRun({ folder, sendId, results: null, totalMs: null, error: null });
-      const done = (patch: Partial<RunState>) => setRun((cur) => (cur?.sendId === sendId ? { ...cur, ...patch } : cur));
+      setRun({ folder, only, sendId, steps: null, running: {}, results: [], finished: false, totalMs: null, error: null });
+      const update = (patch: Partial<RunState>) => setRun((cur) => (cur?.sendId === sendId ? { ...cur, ...patch } : cur));
+      let over = false;
+      const poll = window.setInterval(async () => {
+        const progress = await api.runProgress(sendId).catch(() => null);
+        if (progress && !over) update({ steps: progress.steps, running: progress.running, results: progress.results });
+      }, 250);
       try {
-        const { results, totalMs } = await api.runCollection(sendId, folder, env);
-        done({ results, totalMs });
+        const { steps, results, totalMs } = await api.runCollection(sendId, folder, env, runSettings.parallel, runSettings.retries, only);
+        over = true;
+        update({ steps, results, running: {}, finished: true, totalMs });
       } catch (e) {
-        done({ error: (e as Error).message });
+        over = true;
+        update({ running: {}, finished: true, error: (e as Error).message });
+      } finally {
+        window.clearInterval(poll);
       }
       setHistoryVersion((v) => v + 1);
       loadVars();
     },
-    [flushSave, env, loadVars],
+    [flushSave, env, loadVars, runSettings],
   );
 
   const pasteCurl = (text: string): boolean => {
@@ -408,7 +425,7 @@ export default function App() {
   };
 
   const ops: TreeOps = {
-    run: startRun,
+    run: (folder) => startRun(folder),
     newRequest: async (folder) =>
       guarded(async () => {
         const { id, collection: info } = await api.createRequest(folder, "Новый запрос");
@@ -625,10 +642,16 @@ export default function App() {
                     setRun(null);
                     openRequest(id);
                   }}
-                  onAgain={() => startRun(run.folder)}
+                  settings={runSettings}
+                  onSettings={(next) => {
+                    setRunSettings(next);
+                    store.set("run", JSON.stringify(next));
+                  }}
+                  onAgain={() => startRun(run.folder, run.only)}
+                  onRetryFailed={() => startRun(run.folder, failedIds(run))}
                   onCancel={() => api.cancel(run.sendId)}
                   onClose={() => {
-                    if (run.results === null && run.error === null) api.cancel(run.sendId);
+                    if (!run.finished) api.cancel(run.sendId);
                     setRun(null);
                   }}
                 />

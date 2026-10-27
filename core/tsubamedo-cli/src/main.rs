@@ -12,7 +12,7 @@ use tsubamedo_core::collection::{Collection, MANIFEST};
 use tsubamedo_core::http::{Response, SendOptions};
 use tsubamedo_core::prepare::prepare;
 use tsubamedo_core::request_file::RequestFile;
-use tsubamedo_core::run::{Exchange, Runner};
+use tsubamedo_core::run::{Event, Exchange, RunOptions, Runner};
 use tsubamedo_core::{Body, Error, Pair, Request, Vars};
 
 mod junit;
@@ -117,6 +117,13 @@ struct RunArgs {
     /// Остановиться на первой ошибке.
     #[arg(long)]
     bail: bool,
+    /// Сколько запросов отправлять одновременно; те, что ждут значений из других, всё равно
+    /// идут после них.
+    #[arg(short, long, value_name = "N", default_value_t = 1)]
+    parallel: usize,
+    /// Сколько раз повторить упавший запрос.
+    #[arg(long, value_name = "N", default_value_t = 0)]
+    retry: u32,
     /// Записать отчёт JUnit XML для CI (GitLab, Jenkins, GitHub Actions).
     #[arg(long, value_name = "ФАЙЛ")]
     junit: Option<PathBuf>,
@@ -378,53 +385,30 @@ async fn run(args: RunArgs) -> tsubamedo_core::Result<ExitCode> {
     let wanted = |entry: &tsubamedo_core::collection::Entry| {
         filter.as_ref().is_none_or(|f| entry.id.to_lowercase().contains(f) || entry.display_name().to_lowercase().contains(f))
     };
-    let plan: Vec<(String, Request, PathBuf)> =
-        runner.order(&collection, wanted).into_iter().map(|e| (e.id.clone(), e.request.clone(), e.dir().to_path_buf())).collect();
-
-    'run: for (id, request, dir) in plan {
-        for ex in runner.send(Some(&id), &request, &dir).await {
-            let status = ex.result.as_ref().ok().map(|r| r.status);
-            let failures = {
-                let mut f = ex.failures();
-                if args.fail && status.is_some_and(|s| s >= 400) {
-                    f.push(format!("статус {}", status.unwrap_or_default()));
-                }
-                f
-            };
-            let ok = failures.is_empty();
-            let entry = collection.find(ex.id.as_deref().unwrap_or_default());
-            let title = match entry.and_then(|e| e.request.name.as_deref()) {
-                Some(name) => format!("{}  {}", ex.id.as_deref().unwrap_or_default(), paint.dim(name)),
-                None => ex.id.clone().unwrap_or_default(),
-            };
-            let mark = if ok { paint.green("✓") } else { paint.red("✗") };
-            match &ex.result {
-                Ok(r) => {
-                    let checks = if ex.checks.is_empty() {
-                        String::new()
-                    } else {
-                        paint.dim(&format!("  проверки {}/{}", ex.checks.iter().filter(|c| c.ok).count(), ex.checks.len()))
-                    };
-                    println!(
-                        "{mark} {}  {:>8}  {:>9}  {} {title}{checks}",
-                        paint.status(r.status, &r.status.to_string()),
-                        duration(r.timings.total),
-                        size(r.body.len()),
-                        ex.request.method.to_ascii_uppercase(),
-                    );
-                    for line in check_lines(&ex, &paint).into_iter().filter(|l| !ok || !l.contains('✓')) {
-                        println!("  {line}");
-                    }
-                    if args.fail && r.status >= 400 && ex.checks.is_empty() {
-                        println!("    {}", paint.red(&format!("статус {}", r.status)));
-                    }
-                }
-                Err(e) => println!("{mark} {title}\n    {}", paint.red(&e.to_string())),
+    let steps = runner.plan(&collection, wanted);
+    let options = RunOptions { parallel: args.parallel, retries: args.retry, fail_status: args.fail, bail: args.bail };
+    // Printed as they finish; the report keeps the collection's order.
+    let mut finished: Vec<(usize, Vec<Exchange>, Vec<Vec<String>>)> = Vec::new();
+    runner
+        .run(&steps, &options, |event| match event {
+            Event::Started { step, attempt } if attempt > 1 => {
+                println!("{}", paint.dim(&format!("↻ {} — попытка {attempt}", steps[step].id)));
             }
-            report.case(&ex, &failures);
-            if !ok && args.bail {
-                break 'run;
+            Event::Started { .. } => {}
+            Event::Finished { step, exchanges, .. } => {
+                let mut failures = Vec::new();
+                for ex in &exchanges {
+                    let f = print_exchange(ex, &collection, &args, &paint);
+                    failures.push(f);
+                }
+                finished.push((step, exchanges, failures));
             }
+        })
+        .await;
+    finished.sort_by_key(|(step, ..)| *step);
+    for (_, exchanges, failures) in &finished {
+        for (ex, f) in exchanges.iter().zip(failures) {
+            report.case(ex, f);
         }
     }
     let (passed, failed) = report.counts();
@@ -435,6 +419,46 @@ async fn run(args: RunArgs) -> tsubamedo_core::Result<ExitCode> {
         println!("{}", paint.dim(&format!("Отчёт JUnit: {}", path.display())));
     }
     Ok(if failed == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE })
+}
+
+/// One line for the exchange, and under it what failed; returns what failed.
+fn print_exchange(ex: &Exchange, collection: &Collection, args: &RunArgs, paint: &Paint) -> Vec<String> {
+    let status = ex.result.as_ref().ok().map(|r| r.status);
+    let mut failures = ex.failures();
+    if args.fail && status.is_some_and(|s| s >= 400) {
+        failures.push(format!("статус {}", status.unwrap_or_default()));
+    }
+    let ok = failures.is_empty();
+    let entry = collection.find(ex.id.as_deref().unwrap_or_default());
+    let title = match entry.and_then(|e| e.request.name.as_deref()) {
+        Some(name) => format!("{}  {}", ex.id.as_deref().unwrap_or_default(), paint.dim(name)),
+        None => ex.id.clone().unwrap_or_default(),
+    };
+    let mark = if ok { paint.green("✓") } else { paint.red("✗") };
+    match &ex.result {
+        Ok(r) => {
+            let checks = if ex.checks.is_empty() {
+                String::new()
+            } else {
+                paint.dim(&format!("  проверки {}/{}", ex.checks.iter().filter(|c| c.ok).count(), ex.checks.len()))
+            };
+            println!(
+                "{mark} {}  {:>8}  {:>9}  {} {title}{checks}",
+                paint.status(r.status, &r.status.to_string()),
+                duration(r.timings.total),
+                size(r.body.len()),
+                ex.request.method.to_ascii_uppercase(),
+            );
+            for line in check_lines(ex, paint).into_iter().filter(|l| !ok || !l.contains('✓')) {
+                println!("  {line}");
+            }
+            if args.fail && r.status >= 400 && ex.checks.is_empty() {
+                println!("    {}", paint.red(&format!("статус {}", r.status)));
+            }
+        }
+        Err(e) => println!("{mark} {title}\n    {}", paint.red(&e.to_string())),
+    }
+    failures
 }
 
 fn check(args: CheckArgs) -> tsubamedo_core::Result<ExitCode> {

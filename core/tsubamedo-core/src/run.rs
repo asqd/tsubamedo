@@ -6,8 +6,9 @@
 //! Captured values sit above the collection's files and below the caller's overrides
 //! (`--var` in the CLI): a fresh token beats the placeholder in `dev.local.toml`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::checks::{self, Answer, CheckResult, Captured};
 use crate::collection::{Collection, Entry};
@@ -18,6 +19,8 @@ use crate::{Error, Request, Result, Vars};
 
 /// How deep requests may pull in other requests.
 const MAX_CHAIN: usize = 8;
+/// The pause before a failed request is sent again, times the attempt.
+const RETRY_PAUSE: Duration = Duration::from_millis(500);
 
 /// A request that captures a variable.
 #[derive(Debug, Clone)]
@@ -83,6 +86,43 @@ impl Exchange {
     }
 }
 
+/// A request of a collection run and the steps whose values it takes: it starts after them.
+#[derive(Debug, Clone)]
+pub struct Step {
+    pub id: String,
+    pub request: Request,
+    pub dir: PathBuf,
+    pub after: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunOptions {
+    /// Requests in flight at once; 1 keeps the collection's order exactly.
+    pub parallel: usize,
+    /// How many times a failed request is sent again.
+    pub retries: u32,
+    /// A status of 400 and above fails the request too.
+    pub fail_status: bool,
+    /// Start nothing new after the first failure.
+    pub bail: bool,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        RunOptions { parallel: 1, retries: 0, fail_status: false, bail: false }
+    }
+}
+
+/// What a run reports as it goes.
+pub enum Event {
+    /// A step went out; `attempt` is 2 and more for a retry.
+    Started { step: usize, attempt: u32 },
+    /// A step is done for good: its exchanges (requests sent first for missing values, then
+    /// the step itself) and the attempts it took.
+    Finished { step: usize, attempts: u32, exchanges: Vec<Exchange>, passed: bool },
+}
+
+#[derive(Clone)]
 pub struct Runner {
     base: Vars,
     overrides: Vars,
@@ -92,6 +132,8 @@ pub struct Runner {
     /// Requests that did not give their values; they are not sent again in this run.
     failed: BTreeSet<String>,
     options: SendOptions,
+    /// For a fork: the captured values it started with, to tell what it brought.
+    forked_from: Vars,
 }
 
 impl Runner {
@@ -100,7 +142,7 @@ impl Runner {
             Some(c) => (c.vars(env, &Vars::new())?, producers(c)),
             None => (Vars::new(), BTreeMap::new()),
         };
-        Ok(Runner { base, overrides, captured, producers, failed: BTreeSet::new(), options })
+        Ok(Runner { base, overrides, captured, producers, failed: BTreeSet::new(), options, forked_from: Vars::new() })
     }
 
     pub fn vars(&self) -> Vars {
@@ -137,6 +179,105 @@ impl Runner {
             visit(self, collection, &vars, entry, &mut seen, &mut out);
         }
         out
+    }
+
+    /// The steps of a run: [`Runner::order`] with what each step waits for.
+    pub fn plan(&self, collection: &Collection, wanted: impl Fn(&Entry) -> bool) -> Vec<Step> {
+        let entries = self.order(collection, wanted);
+        self.steps(&entries)
+    }
+
+    /// Exactly these requests, in the collection's order: to send again what failed, without
+    /// what already went well.
+    pub fn plan_only(&self, collection: &Collection, ids: &[String]) -> Vec<Step> {
+        let entries = self.order(collection, |e| ids.contains(&e.id));
+        let only: Vec<&Entry> = entries.into_iter().filter(|e| ids.contains(&e.id)).collect();
+        self.steps(&only)
+    }
+
+    fn steps(&self, entries: &[&Entry]) -> Vec<Step> {
+        let vars = self.vars();
+        let index: HashMap<&str, usize> = entries.iter().enumerate().map(|(i, e)| (e.id.as_str(), i)).collect();
+        entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let mut after: Vec<usize> = variables(&e.request, &vars)
+                    .iter()
+                    .filter(|name| !self.overrides.contains_key(*name))
+                    .filter_map(|name| index.get(self.producers.get(name)?.id.as_str()).copied())
+                    .filter(|&d| d < i)
+                    .collect();
+                after.sort_unstable();
+                after.dedup();
+                Step { id: e.id.clone(), request: e.request.clone(), dir: e.dir().to_path_buf(), after }
+            })
+            .collect()
+    }
+
+    /// Runs the steps: each after those it waits for, up to `parallel` at once, a failed one
+    /// again up to `retries` times. Requests running side by side each see the values captured
+    /// before they started; what they capture is merged as they finish.
+    pub async fn run(&mut self, steps: &[Step], options: &RunOptions, mut on: impl FnMut(Event)) {
+        let parallel = options.parallel.max(1);
+        let mut started = vec![false; steps.len()];
+        let mut done = vec![false; steps.len()];
+        let mut attempts = vec![0u32; steps.len()];
+        let mut stop = false;
+        let mut tasks = tokio::task::JoinSet::new();
+        loop {
+            // In the steps' order, so one at a time is exactly the collection's order.
+            for (i, step) in steps.iter().enumerate() {
+                if stop || tasks.len() >= parallel {
+                    break;
+                }
+                if started[i] || !step.after.iter().all(|&d| done[d]) {
+                    continue;
+                }
+                started[i] = true;
+                attempts[i] = 1;
+                on(Event::Started { step: i, attempt: 1 });
+                tasks.spawn(attempt(self.fork(), step.clone(), i, Duration::ZERO));
+            }
+            let Some(joined) = tasks.join_next().await else { break };
+            let Ok((i, fork, exchanges)) = joined else { continue };
+            self.join(fork);
+            let step = &steps[i];
+            let passed = exchanges.last().is_some_and(|ex| {
+                ex.passed() && !(options.fail_status && ex.result.as_ref().is_ok_and(|r| r.status >= 400))
+            });
+            // A request that never went out (a variable missing, a broken script) fails the
+            // same way again.
+            let went = exchanges.last().is_some_and(|ex| ex.sent.is_some());
+            if !passed && went && attempts[i] <= options.retries {
+                attempts[i] += 1;
+                on(Event::Started { step: i, attempt: attempts[i] });
+                tasks.spawn(attempt(self.fork(), step.clone(), i, RETRY_PAUSE * (attempts[i] - 1)));
+                continue;
+            }
+            if !passed {
+                // Those that take its values do not send it again each.
+                self.failed.insert(step.id.clone());
+                stop |= options.bail;
+            }
+            done[i] = true;
+            on(Event::Finished { step: i, attempts: attempts[i], exchanges, passed });
+        }
+    }
+
+    /// A copy for one request of a parallel run.
+    fn fork(&self) -> Runner {
+        Runner { forked_from: self.captured.clone(), ..self.clone() }
+    }
+
+    /// What a fork captured and learned, without undoing what others captured meanwhile.
+    fn join(&mut self, fork: Runner) {
+        for (name, value) in fork.captured {
+            if fork.forked_from.get(&name) != Some(&value) {
+                self.captured.insert(name, value);
+            }
+        }
+        self.failed.extend(fork.failed);
     }
 
     /// Sends a request. When variables it needs are not set and other requests capture them,
@@ -261,4 +402,12 @@ impl Runner {
         results.extend(checks::run_checks(&request.checks, &answer, &self.vars()));
         (results, captures)
     }
+}
+
+async fn attempt(mut runner: Runner, step: Step, i: usize, pause: Duration) -> (usize, Runner, Vec<Exchange>) {
+    if !pause.is_zero() {
+        tokio::time::sleep(pause).await;
+    }
+    let exchanges = runner.send(Some(&step.id), &step.request, &step.dir).await;
+    (i, runner, exchanges)
 }

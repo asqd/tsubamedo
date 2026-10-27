@@ -310,6 +310,15 @@ button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 .run-row .hist-status { grid-column: auto; }
 .run-row .m { font: 600 10px var(--mono); letter-spacing: .02em; }
 .run-why { grid-column: 3 / -1; white-space: pre-wrap; word-break: break-word; }
+.run-row.waiting { color: var(--muted); }
+.run-row.first { padding-top: 3px; padding-bottom: 3px; opacity: .85; }
+.run-setting { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.run-setting select { font-size: 12px; padding: 1px 2px; }
+.run-bar { display: flex; height: 3px; margin-top: 8px; border-radius: 2px; background: var(--sunken); overflow: hidden; }
+.run-bar .good { background: var(--ok); transition: width .2s; }
+.run-bar .bad { background: var(--bad); transition: width .2s; }
+.run-head > div:first-child { flex: 1 1 auto; min-width: 0; }
+.run-head > button, .run-head > label { flex: none; white-space: nowrap; }
 
 /* Scripts: two JavaScript editors one above the other, and their log under the response. */
 .scripts-editor .hint { margin: 2px 0 8px; line-height: 1.6; }

@@ -199,6 +199,25 @@ async fn chains_checks_and_collection_runs() {
     assert_eq!(passed, [true, false, true]);
     assert_eq!(run["results"][1]["failures"], json!(["status == 201 — пришло 200"]));
     assert_eq!(logins.load(Ordering::SeqCst), 2);
+    assert_eq!(run["steps"].as_array().unwrap().len(), 3);
+    assert_eq!((run["results"][0]["step"].clone(), run["results"][0]["attempts"].clone()), (json!(0), json!(1)));
+
+    // Again only what failed, side by side with retries, watched as it goes.
+    let s2 = again.clone();
+    let rerun = tokio::spawn(async move {
+        call(&s2, "runCollection", json!({ "sendId": "r2", "only": ["orders/created"], "parallel": 4, "retries": 1, "env": null })).await
+    });
+    let mut seen_running = false;
+    while !rerun.is_finished() {
+        let progress = call(&again, "runProgress", json!({ "sendId": "r2" })).await;
+        seen_running |= progress["steps"].as_array().is_some_and(|s| s.len() == 1);
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let rerun = rerun.await.unwrap();
+    assert!(seen_running, "ход запуска виден, пока он идёт");
+    assert_eq!(rerun["results"].as_array().unwrap().len(), 1, "вход не повторяется: токен уже есть");
+    assert_eq!((rerun["results"][0]["id"].clone(), rerun["results"][0]["attempts"].clone()), (json!("orders/created"), json!(2)));
+    assert_eq!(call(&again, "runProgress", json!({ "sendId": "r2" })).await, Value::Null, "после конца прогресс убран");
 
     assert_eq!(call(&s, "validateCheck", json!({ "text": "$.id == {{id}}" })).await, Value::Null);
     assert!(call(&s, "validateCheck", json!({ "text": "status" })).await.is_string());

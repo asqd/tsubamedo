@@ -132,8 +132,24 @@ export interface Before {
   failures: string[];
 }
 
+/** A request of a run's plan. */
+export interface RunStep {
+  id: string;
+  method: string;
+  name: string | null;
+}
+
+export interface RunProgress {
+  steps: RunStep[];
+  running: Record<string, number>;
+  results: RunResult[];
+}
+
 export interface RunResult {
   id: string;
+  /** Its place in the plan; none for a request sent first for a missing value. */
+  step: number | null;
+  attempts: number;
   method: string;
   status: number | null;
   totalMs: number | null;
@@ -275,8 +291,10 @@ export const api = {
   saveBody: (responseId: number, viewId: number | null, path: string) =>
     call<null>("saveBody", { responseId, viewId, path }),
   /** The collection (`folder` empty) or a folder of it, each request after those it takes values from. */
-  runCollection: (sendId: string, folder: string, env: string | null) =>
-    call<{ results: RunResult[]; totalMs: number }>("runCollection", { sendId, folder, env }),
+  runCollection: (sendId: string, folder: string, env: string | null, parallel: number, retries: number, only: string[] | null) =>
+    call<{ steps: RunStep[]; results: RunResult[]; totalMs: number }>("runCollection", { sendId, folder, env, parallel, retries, only }),
+  /** What a run has done so far; null once it is over. */
+  runProgress: (sendId: string) => call<RunProgress | null>("runProgress", { sendId }),
   /** Why a check line is not understood, or null. */
   validateCheck: (text: string) => call<string | null>("validateCheck", { text }),
 };

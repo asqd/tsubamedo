@@ -26,6 +26,9 @@ toml_edit = "0.25"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 webpki-roots = "1"
+memchr = "2"
+memmap2 = "0.9"
+regex = "1"
 
 [dev-dependencies]
 hyper = { version = "1", features = ["server", "http1"] }

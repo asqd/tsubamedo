@@ -3,7 +3,7 @@
 //! Every request opens its own connection (DNS → TCP → TLS → request), so each phase gets an
 //! honest time, as in `curl -w`. HTTP/2 is used when the server offers it over TLS.
 
-mod body;
+pub(crate) mod body;
 mod tls;
 
 use std::net::{IpAddr, SocketAddr};

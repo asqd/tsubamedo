@@ -3,6 +3,9 @@ resolver = "3"
 members = [
     "core/tsubamedo-core",
     "core/tsubamedo-cli",
+    "core/tsubamedo-session",
+    "apps/desktop/src-tauri",
+    "apps/desktop/bridge",
 ]
 
 [workspace.package]
@@ -12,6 +15,7 @@ rust-version = "1.95"
 
 [workspace.dependencies]
 tsubamedo-core = { path = "core/tsubamedo-core" }
+tsubamedo-session = { path = "core/tsubamedo-session" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", default-features = false }

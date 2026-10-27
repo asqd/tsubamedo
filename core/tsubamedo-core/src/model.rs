@@ -1,4 +1,5 @@
 //! A request as the user edits it: text fields may hold `{{variables}}`.
+//! Serialized in camelCase for the app's interface.
 
 use serde::{Deserialize, Serialize};
 
@@ -64,7 +65,7 @@ pub enum ApiKeyLocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "lowercase", rename_all_fields = "camelCase")]
 pub enum Body {
     #[default]
     None,
@@ -92,6 +93,7 @@ impl Body {
 
 /// A multipart field: text, or a file when `is_file` is set (then `value` is its path).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Part {
     pub name: String,
     pub value: String,
@@ -101,6 +103,7 @@ pub struct Part {
 
 /// Per-request overrides of the send options; `None` keeps the default.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RequestOptions {
     pub follow_redirects: Option<bool>,
     pub timeout_ms: Option<u64>,

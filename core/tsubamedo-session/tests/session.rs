@@ -69,6 +69,15 @@ async fn edit_send_and_view_a_big_json() {
     assert_eq!(lines[1]["text"], json!("    \"city\": \"Сочи\""));
     assert_eq!(lines[1]["marks"], json!([[13, 17]]));
 
+    // Once no tab shows the response, its body and views go; newer responses stay.
+    let response = meta["responseId"].as_u64().unwrap();
+    let newer = call(&s, "send", json!({ "sendId": "3", "id": id, "request": request, "env": "local" })).await;
+    call(&s, "retain", json!({ "responses": [], "seen": response })).await;
+    let gone = s.clone().call("viewLines", json!({ "viewId": view["viewId"], "lines": [1] })).await.unwrap_err();
+    assert_eq!(gone, "вид ответа уже закрыт");
+    assert!(s.clone().call("view", json!({ "responseId": response, "pretty": false })).await.is_err());
+    call(&s, "view", json!({ "responseId": newer["responseId"], "pretty": true })).await;
+
     let err = s.clone().call("send", json!({ "sendId": "2", "id": id, "request": request })).await.unwrap_err();
     assert_eq!(err, "не заданы переменные: base");
 
@@ -79,10 +88,10 @@ async fn edit_send_and_view_a_big_json() {
     let imported = call(&s, "importCurl", json!({ "text": curl })).await;
     assert_eq!(imported["url"], json!(format!("{base}/tours")));
 
-    // History: the send that went out, with its body. The one stopped by a missing variable
-    // never left, so it is not there.
+    // History: the two sends that went out, with their bodies. The one stopped by a missing
+    // variable never left, so it is not there.
     let history = call(&s, "history", json!({ "requestId": id })).await;
-    assert_eq!(history.as_array().unwrap().len(), 1);
+    assert_eq!(history.as_array().unwrap().len(), 2);
     assert_eq!((history[0]["status"].as_u64(), history[0]["hasBody"].as_bool()), (Some(200), Some(true)));
     let old = call(&s, "openHistory", json!({ "id": history[0]["id"] })).await;
     assert_eq!(old["request"]["url"], json!("{{base}}/tours"));
@@ -95,7 +104,7 @@ async fn edit_send_and_view_a_big_json() {
     let moved = call(&s, "moveFolder", json!({ "folder": "tours", "parent": call(&s, "createFolder", json!({ "folder": "", "name": "Архив" })).await["id"] })).await;
     assert_eq!(moved["id"], json!("Архив/tours"));
     assert_eq!(moved["collection"]["folders"], json!(["Архив", "Архив/tours"]));
-    assert_eq!(call(&s, "history", json!({ "requestId": "Архив/tours/Все туры" })).await.as_array().unwrap().len(), 1);
+    assert_eq!(call(&s, "history", json!({ "requestId": "Архив/tours/Все туры" })).await.as_array().unwrap().len(), 2);
     call(&s, "clearHistory", json!({})).await;
     assert_eq!(call(&s, "history", json!({})).await, json!([]));
 }

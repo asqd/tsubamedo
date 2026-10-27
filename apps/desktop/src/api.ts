@@ -193,6 +193,8 @@ export const api = {
   vars: (env: string | null) => call<VarInfo[]>("vars", { env }),
   importCurl: (text: string) => call<Request>("importCurl", { text }),
   curl: (id: string | null, request: Request, env: string | null) => call<string>("curl", { id, request, env }),
+  /** Lets the core drop the bodies of responses up to `seen` that no tab shows. */
+  retain: (responses: number[], seen: number) => call<null>("retain", { responses, seen }),
   view: (responseId: number, pretty: boolean) => call<ViewInfo>("view", { responseId, pretty }),
   viewLines: (viewId: number, lines: number[], query: string | null, caseSensitive: boolean) =>
     call<Line[]>("viewLines", { viewId, lines, query, caseSensitive }),

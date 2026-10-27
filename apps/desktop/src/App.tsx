@@ -107,6 +107,17 @@ export default function App() {
     store.set(`active:${root}`, active);
   }, [tabs, active, root]);
 
+  // The core keeps a response's body and views only while a tab shows it, so a closed tab
+  // with a 300 MB answer gives its memory back. Responses newer than any a tab has had are
+  // still on their way to one and stay.
+  const shown = tabs.flatMap((t) => (t.response ? [t.response.responseId] : []));
+  const seenResponse = useRef(0);
+  useEffect(() => {
+    seenResponse.current = Math.max(seenResponse.current, ...shown);
+    if (seenResponse.current > 0) api.retain(shown, seenResponse.current).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown.join(",")]);
+
   const restoreTabs = useCallback(async (info: CollectionInfo | null) => {
     restoring.current = true;
     const key = info?.root ?? "";

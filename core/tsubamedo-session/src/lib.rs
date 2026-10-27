@@ -41,7 +41,8 @@ struct State {
     collection: Option<Collection>,
     /// Bodies of recent responses (sent now or opened from history) for the viewer.
     responses: VecDeque<(u64, ResponseBody)>,
-    views: HashMap<u64, Arc<TextView>>,
+    /// View id → the response it shows and the view.
+    views: HashMap<u64, (u64, Arc<TextView>)>,
     /// `(response, pretty)` → view, so switching modes back and forth costs nothing.
     view_of: HashMap<(u64, bool), u64>,
     next_id: u64,
@@ -71,13 +72,40 @@ impl State {
         self.responses.push_back((id, body));
         while self.responses.len() > KEEP_RESPONSES {
             let (old, _) = self.responses.pop_front().unwrap();
-            for pretty in [false, true] {
-                if let Some(view) = self.view_of.remove(&(old, pretty)) {
-                    self.views.remove(&view);
-                }
-            }
+            self.drop_views(old);
         }
         id
+    }
+
+    /// Drops the bodies the window no longer shows, with their views and temporary files.
+    /// Only those up to `seen`: newer ones are on their way to a tab.
+    fn retain(&mut self, shown: &[u64], seen: u64) {
+        let gone: Vec<u64> = self.responses.iter().map(|&(id, _)| id).filter(|id| *id <= seen && !shown.contains(id)).collect();
+        self.responses.retain(|(id, _)| !gone.contains(id));
+        for &id in &gone {
+            self.drop_views(id);
+        }
+        if !gone.is_empty() {
+            give_back_memory();
+        }
+    }
+
+    fn drop_views(&mut self, response: u64) {
+        self.views.retain(|_, (of, _)| *of != response);
+        self.view_of.retain(|(of, _), _| *of != response);
+    }
+}
+
+/// Returns freed memory to the system. The allocator keeps what a big view used for the next
+/// one, tens of megabytes that the window would carry while idle.
+fn give_back_memory() {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" {
+            fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
+        }
+        // SAFETY: a null zone means all zones; the call only releases free pages.
+        unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
     }
 }
 
@@ -128,6 +156,11 @@ impl Session {
                 if let Some(handle) = self.sends.lock().unwrap().remove(&args::<SendIdArg>(a)?.send_id) {
                     handle.abort();
                 }
+                Ok(Value::Null)
+            }
+            "retain" => {
+                let a: RetainArg = args(a)?;
+                self.state.lock().unwrap().retain(&a.responses, a.seen);
                 Ok(Value::Null)
             }
             "vars" => self.vars(args::<EnvArg>(a)?.env),
@@ -395,7 +428,7 @@ impl Session {
     async fn view(self: Arc<Self>, a: ViewArg) -> Reply {
         let (body, cached) = {
             let state = self.state.lock().unwrap();
-            let cached = state.view_of.get(&(a.response_id, a.pretty)).and_then(|id| Some((*id, state.views.get(id)?.clone())));
+            let cached = state.view_of.get(&(a.response_id, a.pretty)).and_then(|id| Some((*id, state.views.get(id)?.1.clone())));
             (state.body(a.response_id)?, cached)
         };
         let (id, view, note) = match cached {
@@ -418,7 +451,7 @@ impl Session {
                 let view = Arc::new(view);
                 let mut state = self.state.lock().unwrap();
                 let id = state.id();
-                state.views.insert(id, view.clone());
+                state.views.insert(id, (a.response_id, view.clone()));
                 // A failed pretty view is the raw one; it is not cached, so the note shows again.
                 if note.is_none() {
                     state.view_of.insert((a.response_id, a.pretty), id);
@@ -436,7 +469,7 @@ impl Session {
     }
 
     fn get_view(&self, id: u64) -> Result<Arc<TextView>, String> {
-        self.state.lock().unwrap().views.get(&id).cloned().ok_or_else(|| "вид ответа уже закрыт".into())
+        self.state.lock().unwrap().views.get(&id).map(|(_, view)| view.clone()).ok_or_else(|| "вид ответа уже закрыт".into())
     }
 
     fn view_lines(&self, a: LinesArg) -> Reply {
@@ -649,6 +682,12 @@ struct SendArg {
 struct ViewArg {
     response_id: u64,
     pretty: bool,
+}
+
+#[derive(Deserialize)]
+struct RetainArg {
+    responses: Vec<u64>,
+    seen: u64,
 }
 
 #[derive(Deserialize)]

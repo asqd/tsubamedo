@@ -17,6 +17,17 @@
 //! type = "bearer"               # basic: username, password; apikey: key, value, in
 //! token = "{{token}}"
 //!
+//! # or OAuth 2.0: the token is got, kept and renewed by the app
+//! # [auth]
+//! # type = "oauth2"
+//! # grant = "client_credentials"  # authorization_code (default), password
+//! # token_url = "{{auth}}/oauth/token"
+//! # client_id = "{{client_id}}"
+//! # client_secret = "{{client_secret}}"
+//! # scope = "orders:read"
+//! # also: auth_url, redirect_uri, audience, username, password,
+//! # pkce = false, client_auth = "body" (client_id and client_secret in the form)
+//!
 //! [body]
 //! type = "json"                 # json, text, form, multipart, file
 //! content = '''
@@ -27,6 +38,7 @@
 //! follow_redirects = false
 //! timeout_ms = 5000
 //! verify_tls = false
+//! cookies = false               # neither send the environment's cookies nor keep new ones
 //!
 //! # What the response must be (see `checks`); a check can be switched off in place.
 //! checks = [
@@ -57,7 +69,7 @@ use std::path::{Path, PathBuf};
 
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
-use crate::model::{ApiKeyLocation, Auth, Body, Check, Pair, Part, Request, RequestOptions, Scripts};
+use crate::model::{ApiKeyLocation, Auth, Body, Check, ClientAuth, Grant, OAuth2, Pair, Part, Request, RequestOptions, Scripts};
 use crate::{Error, Result};
 
 pub struct RequestFile {
@@ -300,6 +312,29 @@ fn parse_auth(item: Option<&Item>) -> Result<Auth, String> {
                 Some(other) => return Err(format!("auth.in: «{other}», нужно header или query")),
             },
         },
+        Some("oauth2") => Auth::OAuth2(OAuth2 {
+            grant: match opt_str(t, "grant")?.as_deref() {
+                None | Some("authorization_code") => Grant::AuthorizationCode,
+                Some("client_credentials") => Grant::ClientCredentials,
+                Some("password") => Grant::Password,
+                Some(other) => return Err(format!("auth.grant: «{other}», нужно authorization_code, client_credentials или password")),
+            },
+            auth_url: field("auth_url")?,
+            token_url: field("token_url")?,
+            client_id: field("client_id")?,
+            client_secret: field("client_secret")?,
+            scope: field("scope")?,
+            audience: field("audience")?,
+            redirect_uri: field("redirect_uri")?,
+            pkce: opt_bool(t, "pkce")?.unwrap_or(true),
+            client_auth: match opt_str(t, "client_auth")?.as_deref() {
+                None | Some("basic") => ClientAuth::Basic,
+                Some("body") => ClientAuth::Body,
+                Some(other) => return Err(format!("auth.client_auth: «{other}», нужно basic или body")),
+            },
+            username: field("username")?,
+            password: field("password")?,
+        }),
         Some(other) => return Err(format!("auth.type: неизвестный тип «{other}»")),
     })
 }
@@ -343,6 +378,7 @@ fn parse_options(item: Option<&Item>) -> Result<RequestOptions, String> {
         follow_redirects: opt_bool(t, "follow_redirects")?,
         timeout_ms,
         verify_tls: opt_bool(t, "verify_tls")?,
+        cookies: opt_bool(t, "cookies")?,
     })
 }
 
@@ -518,7 +554,10 @@ fn sync_auth(root: &mut Item, auth: &Auth) {
     if parse_auth(root.get("auth")).as_ref() == Ok(auth) {
         return;
     }
-    const KNOWN: &[&str] = &["type", "username", "password", "token", "key", "value", "in"];
+    const KNOWN: &[&str] = &[
+        "type", "username", "password", "token", "key", "value", "in", "grant", "auth_url", "token_url", "client_id", "client_secret",
+        "scope", "audience", "redirect_uri", "pkce", "client_auth",
+    ];
     match auth {
         Auth::None => remove(root, "auth"),
         Auth::Basic { username, password } => {
@@ -533,6 +572,29 @@ fn sync_auth(root: &mut Item, auth: &Auth) {
                 ApiKeyLocation::Query => Some("query"),
             };
             sync_section(root, "auth", KNOWN, &[("type", Some("apikey")), ("key", Some(key)), ("value", Some(value)), ("in", location)]);
+        }
+        Auth::OAuth2(o) => {
+            // Only what is set, so a client-credentials request is a few lines.
+            let given = |s: &str| Some(s.to_string()).filter(|s| !s.is_empty());
+            let code = o.grant == Grant::AuthorizationCode;
+            let fields = [
+                ("type", Some("oauth2".to_string())),
+                ("grant", (!code).then(|| o.grant.as_str().to_string())),
+                ("auth_url", given(&o.auth_url)),
+                ("token_url", Some(o.token_url.clone())),
+                ("client_id", Some(o.client_id.clone())),
+                ("client_secret", given(&o.client_secret)),
+                ("scope", given(&o.scope)),
+                ("audience", given(&o.audience)),
+                ("redirect_uri", given(&o.redirect_uri)),
+                ("client_auth", (o.client_auth == ClientAuth::Body).then(|| "body".to_string())),
+                ("username", given(&o.username)),
+                ("password", given(&o.password)),
+            ];
+            let fields: Vec<(&str, Option<&str>)> = fields.iter().map(|(k, v)| (*k, v.as_deref())).collect();
+            let section = sync_section(root, "auth", KNOWN, &fields);
+            let t = section.as_table_like_mut().expect("table");
+            sync_bool(t, "pkce", (code && !o.pkce).then_some(false));
         }
     }
 }
@@ -650,6 +712,7 @@ fn sync_options(root: &mut Item, options: &RequestOptions) {
     sync_bool(t, "follow_redirects", options.follow_redirects);
     sync_int(t, "timeout_ms", options.timeout_ms);
     sync_bool(t, "verify_tls", options.verify_tls);
+    sync_bool(t, "cookies", options.cookies);
 }
 
 #[cfg(test)]
@@ -747,6 +810,41 @@ content = '''
         r.options = RequestOptions::default();
         f.update(&r);
         assert!(!f.text().contains("[body") && !f.text().contains("[auth]") && !f.text().contains("[options]"), "{}", f.text());
+    }
+
+    #[test]
+    fn oauth2_is_written_short_and_read_back() {
+        let mut f = sample();
+        let mut r = f.request().unwrap();
+        r.auth = Auth::OAuth2(OAuth2 {
+            grant: Grant::ClientCredentials,
+            token_url: "{{auth}}/oauth/token".into(),
+            client_id: "{{client_id}}".into(),
+            client_secret: "{{client_secret}}".into(),
+            scope: "orders:read".into(),
+            ..OAuth2::default()
+        });
+        r.options.cookies = Some(false);
+        f.update(&r);
+        let text = f.text();
+        assert!(
+            text.contains(
+                "[auth]\ntype = \"oauth2\"\ngrant = \"client_credentials\"\ntoken_url = \"{{auth}}/oauth/token\"\nclient_id = \"{{client_id}}\"\nclient_secret = \"{{client_secret}}\"\nscope = \"orders:read\"\n"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("cookies = false"), "{text}");
+        assert_eq!(f.request().unwrap(), r);
+
+        let Auth::OAuth2(o) = &mut r.auth else { unreachable!() };
+        o.grant = Grant::AuthorizationCode;
+        o.auth_url = "{{auth}}/authorize".into();
+        o.pkce = false;
+        o.client_auth = ClientAuth::Body;
+        f.update(&r);
+        let text = f.text();
+        assert!(!text.contains("grant =") && text.contains("pkce = false") && text.contains("client_auth = \"body\""), "{text}");
+        assert_eq!(f.request().unwrap(), r);
     }
 
     #[test]

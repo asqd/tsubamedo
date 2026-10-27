@@ -5,6 +5,7 @@ import { key } from "../platform";
 import { missingVars, useVars } from "../vars";
 import { ChecksEditor } from "./ChecksEditor";
 import { CodeEditor } from "./CodeEditor";
+import { Field, freshOAuth, OAuthEditor } from "./OAuthEditor";
 import { PairsTable } from "./PairsTable";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
@@ -19,6 +20,7 @@ export function RequestEditor({
   saved,
   onPasteCurl,
   onCopyCurl,
+  env,
 }: {
   request: Request;
   onChange: (r: Request) => void;
@@ -29,6 +31,8 @@ export function RequestEditor({
   /** A curl command pasted into the address; true when it was imported. */
   onPasteCurl: (text: string) => boolean;
   onCopyCurl: () => void;
+  /** The open environment: OAuth 2.0 tokens and cookies are kept per settings and per it. */
+  env: string | null;
 }) {
   const [tab, setTab] = useState<Tab>("query");
   const vars = useVars();
@@ -101,7 +105,7 @@ export function RequestEditor({
         {tab === "headers" && (
           <PairsTable rows={request.headers} onChange={(headers) => set({ headers })} namePlaceholder="Заголовок" onSubmit={onSend} />
         )}
-        {tab === "auth" && <AuthEditor auth={request.auth} onChange={(auth) => set({ auth })} />}
+        {tab === "auth" && <AuthEditor request={request} env={env} sending={sending} onChange={(auth) => set({ auth })} />}
         {tab === "body" && <BodyEditor body={request.body} onChange={(body) => set({ body })} onSubmit={onSend} />}
         {tab === "checks" && (
           <ChecksEditor
@@ -123,6 +127,15 @@ export function RequestEditor({
             <label>
               <span>Проверка сертификата</span>
               <TriState value={request.options.verifyTls} yes="проверять" no="не проверять" onChange={(verifyTls) => set({ options: { ...request.options, verifyTls } })} />
+            </label>
+            <label>
+              <span>Cookie</span>
+              <TriState
+                value={request.options.cookies ?? null}
+                yes="отправлять и запоминать"
+                no="без cookie"
+                onChange={(cookies) => set({ options: { ...request.options, cookies } })}
+              />
             </label>
             <label>
               <span>Ждать ответа, мс</span>
@@ -191,13 +204,15 @@ function TriState({ value, yes, no, onChange }: { value: boolean | null; yes: st
   );
 }
 
-function AuthEditor({ auth, onChange }: { auth: Auth; onChange: (a: Auth) => void }) {
+function AuthEditor({ request, env, sending, onChange }: { request: Request; env: string | null; sending: boolean; onChange: (a: Auth) => void }) {
+  const auth = request.auth;
   const switchTo = (type: Auth["type"]) => {
     const fresh: Record<Auth["type"], Auth> = {
       none: { type: "none" },
       basic: { type: "basic", username: "", password: "" },
       bearer: { type: "bearer", token: "" },
       apikey: { type: "apikey", key: "X-Api-Key", value: "", location: "header" },
+      oauth2: freshOAuth(),
     };
     onChange(fresh[type]);
   };
@@ -210,8 +225,10 @@ function AuthEditor({ auth, onChange }: { auth: Auth; onChange: (a: Auth) => voi
           <option value="bearer">Bearer-токен</option>
           <option value="basic">Basic: логин и пароль</option>
           <option value="apikey">API key</option>
+          <option value="oauth2">OAuth 2.0</option>
         </select>
       </label>
+      {auth.type === "oauth2" && <OAuthEditor auth={auth} request={request} env={env} sending={sending} onChange={onChange} />}
       {auth.type === "bearer" && <Field label="Токен" value={auth.token} onChange={(token) => onChange({ ...auth, token })} placeholder="{{token}}" />}
       {auth.type === "basic" && (
         <>
@@ -232,17 +249,8 @@ function AuthEditor({ auth, onChange }: { auth: Auth; onChange: (a: Auth) => voi
           </label>
         </>
       )}
-      {auth.type !== "none" && <div className="hint">Секреты лучше держать в переменных из файла *.local.toml — он не попадает в git.</div>}
+      {auth.type !== "none" && auth.type !== "oauth2" && <div className="hint">Секреты лучше держать в переменных из файла *.local.toml — он не попадает в git.</div>}
     </div>
-  );
-}
-
-function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
-  return (
-    <label>
-      <span>{label}</span>
-      <CodeEditor mode="line" className="field" value={value} placeholder={placeholder} onChange={onChange} />
-    </label>
   );
 }
 

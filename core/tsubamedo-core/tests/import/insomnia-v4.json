@@ -39,7 +39,8 @@
       "authentication": { "type": "apikey", "key": "X-Key", "value": "{{ _.secret_key }}", "addTo": "header" } },
     { "_id": "req_hello", "_type": "request", "parentId": "wrk_1", "name": "", "metaSortKey": -5,
       "method": "GET", "url": "{{ _.base_url }}/hello",
-      "authentication": { "type": "oauth2", "grantType": "client_credentials" } },
+      "authentication": { "type": "oauth2", "grantType": "client_credentials", "accessTokenUrl": "{{ _.base_url }}/oauth/token",
+        "clientId": "app", "clientSecret": "{{ _.secret_key }}", "scope": "read", "credentialsInBody": true } },
     { "_id": "greq_1", "_type": "grpc_request", "parentId": "wrk_1", "name": "gRPC" },
     { "_id": "jar_1", "_type": "cookie_jar", "parentId": "wrk_1", "name": "Default Jar", "cookies": [] }
   ]

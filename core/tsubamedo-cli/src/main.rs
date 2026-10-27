@@ -64,6 +64,9 @@ struct Common {
     /// Ограничение на весь обмен, в секундах.
     #[arg(long, value_name = "СЕК")]
     max_time: Option<f64>,
+    /// Не отправлять cookie, которые поставил сервер (по умолчанию они живут, пока идёт команда).
+    #[arg(long)]
+    no_cookies: bool,
 }
 
 #[derive(Args)]
@@ -171,6 +174,8 @@ fn send_options(common: &Common) -> SendOptions {
     SendOptions {
         verify_tls: !common.insecure,
         timeout: common.max_time.map(Duration::from_secs_f64),
+        // One jar for the whole command: a login in `run` serves the requests after it.
+        cookies: (!common.no_cookies).then(|| tsubamedo_core::cookies::Jar::default().shared()),
         ..SendOptions::default()
     }
 }

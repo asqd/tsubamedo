@@ -5,6 +5,8 @@
 //! - [`curl`] — `curl …` commands in and out.
 //! - [`organize`] — renaming, moving and deleting requests and folders (to the Trash).
 //! - [`collection`] — a folder of request files, environments and their variables.
+//! - [`cookies`] — what servers set, sent back like a browser does, a jar per environment.
+//! - [`oauth`] — OAuth 2.0 tokens: got in the browser or directly, kept and renewed.
 //! - [`prepare`] — variables substituted, auth and body turned into bytes and headers.
 //! - [`http`] — sending with a time for every phase; big bodies go to a temporary file.
 //! - [`view`] — lines of a body (raw or pretty JSON) for a viewer that never loads it whole.
@@ -16,11 +18,13 @@
 
 pub mod checks;
 pub mod collection;
+pub mod cookies;
 pub mod curl;
 pub mod error;
 pub mod http;
 pub mod import;
 pub mod model;
+pub mod oauth;
 pub mod organize;
 pub mod prepare;
 pub mod request_file;
@@ -31,5 +35,5 @@ pub mod template;
 pub mod view;
 
 pub use error::{Error, Result};
-pub use model::{ApiKeyLocation, Auth, Body, Check, Pair, Part, Request, RequestOptions, Scripts};
+pub use model::{ApiKeyLocation, Auth, Body, Check, ClientAuth, Grant, OAuth2, Pair, Part, Request, RequestOptions, Scripts};
 pub use template::Vars;

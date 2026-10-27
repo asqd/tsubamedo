@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::collection::Collection;
-use crate::model::{ApiKeyLocation, Auth, Check, Part};
+use crate::model::{ApiKeyLocation, Auth, Check, ClientAuth, Grant, OAuth2, Part};
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/import").join(name)
@@ -63,7 +63,20 @@ fn insomnia_v4_with_response_tags_folders_and_environments() {
     assert!(!var(&i.vars, "base_url").secret);
     let prod = i.environments.iter().find(|e| e.name == "prod").unwrap();
     assert!(prod.vars.iter().all(|v| v.secret), "приватное окружение Insomnia");
-    assert!(warned(&i, "oauth2"));
+    let hello = i.requests.iter().find(|p| p.request.url.ends_with("/hello")).unwrap();
+    assert_eq!(
+        hello.request.auth,
+        Auth::OAuth2(OAuth2 {
+            grant: Grant::ClientCredentials,
+            token_url: "{{base_url}}/oauth/token".into(),
+            client_id: "app".into(),
+            client_secret: "{{secret_key}}".into(),
+            scope: "read".into(),
+            pkce: false,
+            client_auth: ClientAuth::Body,
+            ..OAuth2::default()
+        })
+    );
     assert!(warned(&i, "gRPC-запросы (1)"));
     assert!(!warned(&i, "не заданы"), "{:?}", i.warnings);
 }
@@ -146,6 +159,18 @@ fn openapi_operations_with_examples_and_security() {
     assert_eq!(list.request.auth, Auth::Bearer { token: "{{token}}".into() });
     assert_eq!(list.request.checks, [Check::new("status == 200"), Check::new("$ schema schemas/GET pets ответ.json")]);
     assert_eq!(find(&i, "Один питомец").request.checks[1], Check::new("$ schema schemas/Pet.json"));
+    assert_eq!(
+        find(&i, "Один питомец").request.auth,
+        Auth::OAuth2(OAuth2 {
+            grant: Grant::ClientCredentials,
+            token_url: "https://id.pets.test/token".into(),
+            client_id: "{{client_id}}".into(),
+            client_secret: "{{client_secret}}".into(),
+            scope: "pets:read owners:read".into(),
+            ..OAuth2::default()
+        }),
+        "клиент сам по себе — client credentials"
+    );
     let files: Vec<&str> = i.files.iter().map(|(p, _)| p.as_str()).collect();
     assert_eq!(files, ["schemas/GET pets ответ.json", "schemas/Pet.json", "schemas/Owner.json"]);
     let pet: Value = serde_json::from_str(&i.files[1].1).unwrap();
@@ -170,7 +195,7 @@ fn openapi_operations_with_examples_and_security() {
     assert_eq!(photo.request.auth, Auth::ApiKey { key: "X-Api-Key".into(), value: "{{api_key}}".into(), location: ApiKeyLocation::Header });
     assert!(matches!(&photo.request.body, Body::Multipart { parts } if parts[1].is_file && parts[0].value == "Мурзик"));
     assert!(find(&i, "/health").folder.is_empty());
-    assert!(warned(&i, "не заданы переменные: api_key, petId, token"));
+    assert!(warned(&i, "не заданы переменные: api_key, client_id, client_secret, petId, token"));
 }
 
 #[test]
@@ -260,6 +285,7 @@ fn openapi_schemas_check_real_answers() {
             remote_addr: "127.0.0.1:80".parse().unwrap(),
             tls: None,
             redirects: Vec::new(),
+            sent_cookie: None,
         };
         let out = run_checks(&entry.request.checks, &Answer::new(&r), &Vars::new(), Some(entry.dir()));
         (out[1].ok, out[1].error.clone().unwrap_or_default())

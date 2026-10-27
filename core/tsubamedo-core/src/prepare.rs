@@ -8,7 +8,7 @@ use base64::Engine;
 use bytes::Bytes;
 use url::Url;
 
-use crate::model::{ApiKeyLocation, Auth, Body, Pair, Request, RequestOptions};
+use crate::model::{ApiKeyLocation, Auth, Body, OAuth2, Pair, Request, RequestOptions};
 use crate::template::{Renderer, Vars};
 use crate::{Error, Result};
 
@@ -20,6 +20,8 @@ pub struct Prepared {
     pub headers: Vec<(String, String)>,
     pub body: Bytes,
     pub options: RequestOptions,
+    /// OAuth 2.0 with variables substituted: the sender gets the token and adds it.
+    pub oauth: Option<OAuth2>,
 }
 
 impl Prepared {
@@ -34,6 +36,7 @@ pub fn prepare(request: &Request, vars: &Vars, base_dir: &Path) -> Result<Prepar
     let url = r.render(&request.url);
     let mut query = render_pairs(&mut r, &request.query);
     let mut headers = render_pairs(&mut r, &request.headers);
+    let mut oauth = None;
 
     match &request.auth {
         Auth::None => {}
@@ -49,6 +52,13 @@ pub fn prepare(request: &Request, vars: &Vars, base_dir: &Path) -> Result<Prepar
                 ApiKeyLocation::Header => push_default(&mut headers, &pair.0, pair.1),
                 ApiKeyLocation::Query => query.push(pair),
             }
+        }
+        Auth::OAuth2(o) => {
+            let mut o = o.clone();
+            for field in oauth_fields(&mut o) {
+                *field = r.render(field);
+            }
+            oauth = Some(o);
         }
     }
 
@@ -104,7 +114,7 @@ pub fn prepare(request: &Request, vars: &Vars, base_dir: &Path) -> Result<Prepar
     if method.is_empty() || !method.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.!#$%&'*+^`|~".contains(&b)) {
         return Err(Error::Invalid(format!("неверный метод «{method}»")));
     }
-    Ok(Prepared { method, url, headers, body, options: request.options.clone() })
+    Ok(Prepared { method, url, headers, body, options: request.options.clone(), oauth })
 }
 
 /// Variables a request refers to, with those inside the values of other variables: what it
@@ -122,6 +132,17 @@ pub fn variables(request: &Request, vars: &Vars) -> BTreeSet<String> {
         Auth::Basic { username, password } => texts.extend([username.as_str(), password]),
         Auth::Bearer { token } => texts.push(token),
         Auth::ApiKey { key, value, .. } => texts.extend([key.as_str(), value]),
+        Auth::OAuth2(o) => texts.extend([
+            &o.auth_url,
+            &o.token_url,
+            &o.client_id,
+            &o.client_secret,
+            &o.scope,
+            &o.audience,
+            &o.redirect_uri,
+            &o.username,
+            &o.password,
+        ].map(String::as_str)),
     }
     match &request.body {
         Body::None => {}
@@ -161,6 +182,33 @@ pub fn parse_url(text: &str) -> Result<Url> {
         return Err(bad("нет имени сервера".into()));
     }
     Ok(url)
+}
+
+/// The text fields of OAuth 2.0 settings, for substitution.
+pub(crate) fn oauth_fields(o: &mut OAuth2) -> [&mut String; 9] {
+    [
+        &mut o.auth_url,
+        &mut o.token_url,
+        &mut o.client_id,
+        &mut o.client_secret,
+        &mut o.scope,
+        &mut o.audience,
+        &mut o.redirect_uri,
+        &mut o.username,
+        &mut o.password,
+    ]
+}
+
+/// OAuth 2.0 settings with variables substituted, to look up or get their token apart from a
+/// request.
+pub fn render_oauth(o: &OAuth2, vars: &Vars) -> Result<OAuth2> {
+    let mut r = Renderer::new(vars);
+    let mut o = o.clone();
+    for field in oauth_fields(&mut o) {
+        *field = r.render(field);
+    }
+    r.finish()?;
+    Ok(o)
 }
 
 fn render_pairs(r: &mut Renderer, pairs: &[Pair]) -> Vec<(String, String)> {

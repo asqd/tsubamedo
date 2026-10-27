@@ -56,6 +56,8 @@ paths:
     get:
       tags: [pets]
       summary: Один питомец
+      security:
+        - oauth: [pets:read, owners:read]
       responses:
         "200":
           description: ok
@@ -133,6 +135,16 @@ components:
           properties:
             vip: { type: boolean }
   securitySchemes:
+    oauth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://id.pets.test/authorize
+          tokenUrl: https://id.pets.test/token
+          scopes: { "pets:read": read }
+        clientCredentials:
+          tokenUrl: https://id.pets.test/token
+          scopes: { "pets:read": read }
     bearer:
       type: http
       scheme: bearer

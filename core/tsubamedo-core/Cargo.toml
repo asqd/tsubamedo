@@ -20,7 +20,7 @@ rustls-native-certs = "0.8"
 serde = { workspace = true }
 tempfile = "3"
 thiserror = "2"
-tokio = { workspace = true, features = ["net", "time", "rt"] }
+tokio = { workspace = true, features = ["net", "time", "rt", "sync", "io-util"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 toml_edit = "0.25"
 trash = "5"

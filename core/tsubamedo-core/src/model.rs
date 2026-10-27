@@ -91,6 +91,81 @@ pub enum Auth {
     Bearer { token: String },
     #[serde(rename = "apikey")]
     ApiKey { key: String, value: String, location: ApiKeyLocation },
+    /// The token is got and renewed on its own; see [`crate::oauth`].
+    #[serde(rename = "oauth2")]
+    OAuth2(OAuth2),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OAuth2 {
+    pub grant: Grant,
+    /// Where the user signs in (authorization code).
+    pub auth_url: String,
+    pub token_url: String,
+    pub client_id: String,
+    /// Empty for a public client (an app with PKCE).
+    pub client_secret: String,
+    pub scope: String,
+    /// Asked by Auth0 and some others; sent when given.
+    pub audience: String,
+    /// `http://127.0.0.1:<port>/…` or `localhost`; empty — a free port is picked.
+    pub redirect_uri: String,
+    pub pkce: bool,
+    pub client_auth: ClientAuth,
+    /// Password grant.
+    pub username: String,
+    pub password: String,
+}
+
+impl Default for OAuth2 {
+    fn default() -> Self {
+        OAuth2 {
+            grant: Grant::default(),
+            auth_url: String::new(),
+            token_url: String::new(),
+            client_id: String::new(),
+            client_secret: String::new(),
+            scope: String::new(),
+            audience: String::new(),
+            redirect_uri: String::new(),
+            pkce: true,
+            client_auth: ClientAuth::default(),
+            username: String::new(),
+            password: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Grant {
+    /// The user signs in in the browser; the app catches the code on this machine.
+    #[default]
+    AuthorizationCode,
+    ClientCredentials,
+    Password,
+}
+
+impl Grant {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Grant::AuthorizationCode => "authorization_code",
+            Grant::ClientCredentials => "client_credentials",
+            Grant::Password => "password",
+        }
+    }
+}
+
+/// How the client proves itself to the token endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClientAuth {
+    /// `Authorization: Basic` (client_secret_basic).
+    #[default]
+    Basic,
+    /// `client_id` and `client_secret` in the form (client_secret_post).
+    Body,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -145,4 +220,7 @@ pub struct RequestOptions {
     pub follow_redirects: Option<bool>,
     pub timeout_ms: Option<u64>,
     pub verify_tls: Option<bool>,
+    /// Send the environment's cookies and keep those the server sets; on unless `false`.
+    #[serde(default)]
+    pub cookies: Option<bool>,
 }

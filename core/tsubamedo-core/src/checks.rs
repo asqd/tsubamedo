@@ -546,6 +546,7 @@ mod tests {
             remote_addr: "127.0.0.1:80".parse().unwrap(),
             tls: None,
             redirects: Vec::new(),
+            sent_cookie: None,
         }
     }
 

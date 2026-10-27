@@ -156,7 +156,7 @@ function ChecksResult({ meta }: { meta: ResponseMeta }) {
       ))}
       {(meta.logs ?? []).length > 0 && (
         <>
-          <div className="section-head">Журнал скриптов</div>
+          <div className="section-head">Журнал: скрипты и авторизация</div>
           <pre className="script-log mono small sel">{(meta.logs ?? []).join("\n")}</pre>
         </>
       )}

@@ -20,7 +20,47 @@ export type Auth =
   | { type: "none" }
   | { type: "basic"; username: string; password: string }
   | { type: "bearer"; token: string }
-  | { type: "apikey"; key: string; value: string; location: "header" | "query" };
+  | { type: "apikey"; key: string; value: string; location: "header" | "query" }
+  | ({ type: "oauth2" } & OAuth2);
+
+/** The token is got, kept and renewed by the core. */
+export interface OAuth2 {
+  grant: "authorization_code" | "client_credentials" | "password";
+  authUrl: string;
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  scope: string;
+  audience: string;
+  /** Empty: a free port on this machine. */
+  redirectUri: string;
+  pkce: boolean;
+  clientAuth: "basic" | "body";
+  username: string;
+  password: string;
+}
+
+/** A kept token, never whole. Times are Unix seconds. */
+export interface TokenInfo {
+  preview: string;
+  obtainedAt: number;
+  expiresAt: number | null;
+  hasRefresh: boolean;
+  scope: string | null;
+}
+
+export interface Cookie {
+  name: string;
+  value: string;
+  domain: string;
+  hostOnly: boolean;
+  path: string;
+  /** Unix seconds; null — until the jar is cleared. */
+  expires: number | null;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite?: string;
+}
 
 export type Body =
   | { type: "none" }
@@ -34,6 +74,8 @@ export interface RequestOptions {
   followRedirects: boolean | null;
   timeoutMs: number | null;
   verifyTls: boolean | null;
+  /** Send the environment's cookies and keep new ones; on unless false. */
+  cookies?: boolean | null;
 }
 
 /** A response check: `status == 200`, `$.items count > 0`. */
@@ -295,6 +337,14 @@ export const api = {
     call<{ steps: RunStep[]; results: RunResult[]; totalMs: number }>("runCollection", { sendId, folder, env, parallel, retries, only }),
   /** What a run has done so far; null once it is over. */
   runProgress: (sendId: string) => call<RunProgress | null>("runProgress", { sendId }),
+  cookies: (env: string | null) => call<Cookie[]>("cookies", { env }),
+  deleteCookie: (env: string | null, c: Cookie) => call<null>("deleteCookie", { env, domain: c.domain, path: c.path, name: c.name }),
+  clearCookies: (env: string | null) => call<null>("clearCookies", { env }),
+  /** The kept token for the request's OAuth 2.0 settings, or null. */
+  oauthStatus: (request: Request, env: string | null) => call<TokenInfo | null>("oauthStatus", { request, env }),
+  /** A new token now; a sign-in in the browser waits until `cancel(sendId)`. */
+  oauthToken: (sendId: string, request: Request, env: string | null) => call<TokenInfo>("oauthToken", { sendId, request, env }),
+  oauthForget: (request: Request, env: string | null) => call<null>("oauthForget", { request, env }),
   /** Why a check line is not understood, or null. */
   validateCheck: (text: string) => call<string | null>("validateCheck", { text }),
 };

@@ -12,7 +12,7 @@ use base64::Engine;
 use serde_json::Value;
 
 use super::{Environment, Format, Imported, Placed, Var, array_at, body_of, join_scripts, map_builtins, map_texts, path_name, split_query, str_at, text};
-use crate::model::{ApiKeyLocation, Auth, Body, Pair, Part, Request};
+use crate::model::{ApiKeyLocation, Auth, Body, ClientAuth, Grant, OAuth2, Pair, Part, Request};
 use crate::{Error, Result};
 
 enum Tree<'a> {
@@ -250,6 +250,33 @@ impl Converter {
                 value: str_at(a, "value").into(),
                 location: if str_at(a, "addTo") == "queryParams" { ApiKeyLocation::Query } else { ApiKeyLocation::Header },
             },
+            "oauth2" => {
+                let grant = match str_at(a, "grantType") {
+                    "client_credentials" => Grant::ClientCredentials,
+                    "password" => Grant::Password,
+                    "implicit" => {
+                        self.warnings.push("OAuth 2.0 implicit из Insomnia перенесён как authorization code с PKCE: implicit устарел и не поддерживается".into());
+                        Grant::AuthorizationCode
+                    }
+                    _ => Grant::AuthorizationCode,
+                };
+                let redirect = str_at(a, "redirectUrl");
+                let loopback = redirect.starts_with("http://127.0.0.1") || redirect.starts_with("http://localhost");
+                Auth::OAuth2(OAuth2 {
+                    grant,
+                    auth_url: str_at(a, "authorizationUrl").into(),
+                    token_url: str_at(a, "accessTokenUrl").into(),
+                    client_id: str_at(a, "clientId").into(),
+                    client_secret: str_at(a, "clientSecret").into(),
+                    scope: str_at(a, "scope").into(),
+                    audience: str_at(a, "audience").into(),
+                    redirect_uri: if loopback { redirect.into() } else { String::new() },
+                    pkce: a.get("usePkce").and_then(Value::as_bool).unwrap_or(grant == Grant::AuthorizationCode),
+                    client_auth: if a.get("credentialsInBody").and_then(Value::as_bool).unwrap_or(false) { ClientAuth::Body } else { ClientAuth::Basic },
+                    username: str_at(a, "username").into(),
+                    password: str_at(a, "password").into(),
+                })
+            }
             other => {
                 self.warnings.push(format!("авторизация {other} из Insomnia пока не поддерживается — у таких запросов её нет"));
                 Auth::None

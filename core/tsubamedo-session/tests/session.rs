@@ -261,3 +261,68 @@ async fn scripts_before_and_after() {
     let err = s.clone().call("send", json!({ "sendId": "2", "id": "orders", "request": broken, "env": null })).await.unwrap_err();
     assert!(err.starts_with("скрипт до запроса: ") && err.ends_with("(строка 2)"), "{err}");
 }
+
+/// Sets a session cookie on /login and wants it on /me; gives tokens on /token, wants one on /api.
+async fn auth_server() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut buf = vec![0; 8192];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+                let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let (status, extra, body) = match path.as_str() {
+                    "/login" => ("200 OK", "Set-Cookie: sid=42; Path=/; Max-Age=3600\r\n", "{}"),
+                    "/me" if head.contains("cookie: sid=42") => ("200 OK", "", r#"{"user":"кот"}"#),
+                    "/token" if head.contains("grant_type=client_credentials") => {
+                        ("200 OK", "", r#"{"access_token":"eyJhbGciOiJIUzI1NiJ9.kot.signature","expires_in":600}"#)
+                    }
+                    "/api" if head.contains("authorization: bearer eyjhbgcioijiuzi1nij9.kot.signature") => ("200 OK", "", "{}"),
+                    _ => ("401 Unauthorized", "", "{}"),
+                };
+                let reply = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = stream.write_all(reply.as_bytes()).await;
+            });
+        }
+    });
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn cookies_and_tokens_last_between_starts() {
+    let base = auth_server().await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("tsubamedo.toml"), format!("name = \"Вход\"\n[vars]\nbase = \"{base}\"\n")).unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let s = Session::with_data_dir(data.path().to_path_buf());
+    call(&s, "openCollection", json!({ "path": dir.path() })).await;
+    let send = |url: &str, auth: Value| json!({ "sendId": "x", "request": { "name": null, "method": "GET", "url": url, "query": [], "headers": [], "auth": auth, "body": { "type": "none" }, "options": {} }, "env": null });
+
+    call(&s, "send", send("{{base}}/login", json!({ "type": "none" }))).await;
+    let cookies = call(&s, "cookies", json!({ "env": null })).await;
+    assert_eq!((cookies[0]["name"].clone(), cookies[0]["domain"].clone()), (json!("sid"), json!("127.0.0.1")), "{cookies}");
+
+    let oauth = json!({ "type": "oauth2", "grant": "client_credentials", "tokenUrl": "{{base}}/token", "clientId": "app" });
+    let request = send("{{base}}/api", oauth.clone())["request"].clone();
+    assert_eq!(call(&s, "oauthStatus", json!({ "request": request, "env": null })).await, Value::Null);
+    let token = call(&s, "oauthToken", json!({ "request": request, "env": null })).await;
+    assert_eq!(token["preview"], json!("eyJhbGci…ture"));
+
+    // Another start of the app: both are still there.
+    let s = Session::with_data_dir(data.path().to_path_buf());
+    call(&s, "openCollection", json!({ "path": dir.path() })).await;
+    let me = call(&s, "send", send("{{base}}/me", json!({ "type": "none" }))).await;
+    assert_eq!(me["status"], json!(200));
+    assert!(me["sent"]["headers"].as_array().unwrap().iter().any(|h| h == &json!(["Cookie", "sid=42"])), "{}", me["sent"]);
+    let api = call(&s, "send", send("{{base}}/api", oauth)).await;
+    assert_eq!((api["status"].clone(), api["logs"].clone()), (json!(200), json!([])), "the kept token, no new one");
+    assert_eq!(call(&s, "oauthStatus", json!({ "request": request, "env": null })).await["preview"], json!("eyJhbGci…ture"));
+
+    call(&s, "clearCookies", json!({ "env": null })).await;
+    assert_eq!(call(&s, "send", send("{{base}}/me", json!({ "type": "none" }))).await["status"], json!(401));
+    call(&s, "oauthForget", json!({ "request": request, "env": null })).await;
+    assert_eq!(call(&s, "oauthStatus", json!({ "request": request, "env": null })).await, Value::Null);
+}

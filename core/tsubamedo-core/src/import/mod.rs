@@ -441,6 +441,11 @@ fn map_texts(request: &mut Request, mut f: impl FnMut(&str) -> String) {
             *key = f(key);
             *value = f(value);
         }
+        Auth::OAuth2(o) => {
+            for field in crate::prepare::oauth_fields(o) {
+                *field = f(field);
+            }
+        }
     }
     match &mut request.body {
         Body::Json { content } | Body::Text { content, .. } => *content = f(content),

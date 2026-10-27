@@ -2,6 +2,7 @@
 // Edits are saved to the request's file as you type; the core rewrites only what changed.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, CollectionInfo, emptyRequest, ImportPreview, Reorganized, Request } from "./api";
+import { CookiesDialog } from "./components/CookiesDialog";
 import { ImportDialog, ImportTarget } from "./components/ImportDialog";
 import { Logo } from "./components/Logo";
 import { RequestEditor } from "./components/RequestEditor";
@@ -69,6 +70,7 @@ export default function App() {
       return { parallel: 1, retries: 0 };
     }
   });
+  const [cookiesOpen, setCookiesOpen] = useState(false);
   const [importing, setImporting] = useState<{ path: string; preview: ImportPreview; busy: boolean } | null>(null);
 
   const tabsRef = useRef(tabs);
@@ -608,6 +610,9 @@ export default function App() {
               </select>
             </label>
           )}
+          <button className="ghost small" onClick={() => setCookiesOpen(true)} title="Cookie, которые поставили серверы, — у каждого окружения свои">
+            Cookie
+          </button>
           <span className="faint small save-state">{saveState === "saving" ? "сохраняю…" : saveState === "saved" ? "сохранено" : ""}</span>
         </header>
         {problem && (
@@ -666,6 +671,7 @@ export default function App() {
                   saved={tab.id}
                   onPasteCurl={pasteCurl}
                   onCopyCurl={copyCurl}
+                  env={env}
                 />
               </section>
               <div className="splitter" onPointerDown={dragSplit} />
@@ -696,6 +702,7 @@ export default function App() {
             )}
           </div>
         )}
+        {cookiesOpen && <CookiesDialog env={env} onClose={() => setCookiesOpen(false)} />}
         {importing && (
           <ImportDialog
             path={importing.path}

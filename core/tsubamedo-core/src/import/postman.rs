@@ -7,7 +7,7 @@
 use serde_json::Value;
 
 use super::{Environment, Format, Imported, Placed, Var, array_at, body_of, join_scripts, map_builtins, map_texts, path_name, split_query, str_at, text};
-use crate::model::{ApiKeyLocation, Auth, Body, Pair, Part, Request};
+use crate::model::{ApiKeyLocation, Auth, Body, ClientAuth, Grant, OAuth2, Pair, Part, Request};
 use crate::Result;
 
 #[derive(Clone, Default)]
@@ -105,7 +105,7 @@ impl Converter {
             return Request { name: Some(path_name(&url)), url, query, ..Request::default() };
         }
         let (url, query) = self.url(r.get("url").unwrap_or(&Value::Null));
-        let mut headers: Vec<Pair> = match r.get("header") {
+        let headers: Vec<Pair> = match r.get("header") {
             Some(Value::String(s)) => s
                 .lines()
                 .filter_map(|l| l.split_once(':'))
@@ -114,7 +114,7 @@ impl Converter {
             _ => array_at(r, "header").iter().map(|h| Pair { name: key(h).into(), value: text(&h["value"]), enabled: !disabled(h) }).collect(),
         };
         let auth = match r.get("auth").filter(|a| !a.is_null()).or(inherited.auth.as_ref()) {
-            Some(a) => self.auth(a, &mut headers),
+            Some(a) => self.auth(a),
             None => Auth::None,
         };
         let body = self.body(r.get("body").unwrap_or(&Value::Null), &headers);
@@ -176,7 +176,7 @@ impl Converter {
         (base, query)
     }
 
-    fn auth(&mut self, a: &Value, headers: &mut Vec<Pair>) -> Auth {
+    fn auth(&mut self, a: &Value) -> Auth {
         let kind = str_at(a, "type");
         // v2.1 keeps fields as a list of {key, value}, v2.0 as an object.
         let field = |name: &str| -> String {
@@ -196,12 +196,32 @@ impl Converter {
                 location: if field("in") == "query" { ApiKeyLocation::Query } else { ApiKeyLocation::Header },
             },
             "oauth2" => {
-                let token = field("accessToken");
-                if !token.is_empty() {
-                    headers.push(Pair::new("Authorization", format!("Bearer {token}")));
-                }
-                self.warnings.push("OAuth 2.0 из Postman пока не поддерживается: где был токен, он подставлен в заголовок Authorization".into());
-                Auth::None
+                let grant = match field("grant_type").as_str() {
+                    "client_credentials" => Grant::ClientCredentials,
+                    "password_credentials" => Grant::Password,
+                    "implicit" => {
+                        self.warnings.push("OAuth 2.0 implicit из Postman перенесён как authorization code с PKCE: implicit устарел и не поддерживается".into());
+                        Grant::AuthorizationCode
+                    }
+                    _ => Grant::AuthorizationCode,
+                };
+                Auth::OAuth2(OAuth2 {
+                    grant,
+                    auth_url: field("authUrl"),
+                    token_url: field("accessTokenUrl"),
+                    client_id: field("clientId"),
+                    client_secret: field("clientSecret"),
+                    scope: field("scope"),
+                    // Postman's own page (oauth.pstmn.io) cannot bring the code here: a port on
+                    // this machine is picked instead.
+                    redirect_uri: Some(field("redirect_uri")).filter(|u| u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost")).unwrap_or_default(),
+                    // Postman has PKCE as a grant of its own; elsewhere it costs nothing to keep.
+                    pkce: true,
+                    client_auth: if field("client_authentication") == "body" { ClientAuth::Body } else { ClientAuth::Basic },
+                    username: field("username"),
+                    password: field("password"),
+                    ..OAuth2::default()
+                })
             }
             other => {
                 self.warnings.push(format!("авторизация {other} из Postman пока не поддерживается — у таких запросов её нет"));

@@ -23,6 +23,7 @@ use url::{Host, Position, Url};
 pub use body::ResponseBody;
 use body::{Decoder, Sink};
 
+use crate::cookies::{self, SharedJar};
 use crate::error::chain;
 use crate::prepare::Prepared;
 use crate::{Error, Result};
@@ -41,6 +42,8 @@ pub struct SendOptions {
     pub spill_threshold: usize,
     pub spill_dir: PathBuf,
     pub decompress: bool,
+    /// Cookies to send and to keep from the responses, on every hop of redirects too.
+    pub cookies: Option<SharedJar>,
 }
 
 impl Default for SendOptions {
@@ -54,6 +57,7 @@ impl Default for SendOptions {
             spill_threshold: 8 << 20,
             spill_dir: std::env::temp_dir().join("tsubamedo"),
             decompress: true,
+            cookies: None,
         }
     }
 }
@@ -66,6 +70,7 @@ impl SendOptions {
             follow_redirects: o.follow_redirects.unwrap_or(self.follow_redirects),
             timeout: o.timeout_ms.map(Duration::from_millis).or(self.timeout),
             verify_tls: o.verify_tls.unwrap_or(self.verify_tls),
+            cookies: if o.cookies == Some(false) { None } else { self.cookies.clone() },
             ..self.clone()
         }
     }
@@ -128,6 +133,8 @@ pub struct Response {
     pub remote_addr: SocketAddr,
     pub tls: Option<TlsInfo>,
     pub redirects: Vec<Redirect>,
+    /// The `Cookie` header that went out with the request when the jar added to it.
+    pub sent_cookie: Option<String>,
 }
 
 impl Response {
@@ -160,8 +167,27 @@ async fn exchange(request: &Prepared, options: &SendOptions) -> Result<Response>
     let mut headers = request.headers.clone();
     let mut body = request.body.clone();
     let mut redirects = Vec::new();
+    // The user's own cookies go only to the server the request was written for.
+    let own_cookie = request.header("cookie").map(str::to_string);
+    let origin = url.origin();
+    let mut sent_cookie = None;
     loop {
+        if let Some(jar) = &options.cookies {
+            let from_jar = jar.lock().unwrap().header(&url);
+            let own = own_cookie.as_deref().filter(|_| url.origin() == origin);
+            let cookie = cookies::merge(own, from_jar.as_deref());
+            if redirects.is_empty() && cookie != own_cookie {
+                sent_cookie = cookie.clone();
+            }
+            set_header(&mut headers, "Cookie", cookie);
+        }
         let hop = hop(&method, &url, &headers, body.clone(), options).await?;
+        if let Some(jar) = &options.cookies {
+            let mut jar = jar.lock().unwrap();
+            for value in hop.response.headers().get_all(hyper::header::SET_COOKIE) {
+                jar.store(&url, &String::from_utf8_lossy(value.as_bytes()));
+            }
+        }
         let status = hop.response.status().as_u16();
         let location = hop.response.headers().get(hyper::header::LOCATION).and_then(|l| l.to_str().ok());
         if let (true, 301 | 302 | 303 | 307 | 308, Some(location)) = (options.follow_redirects, status, location) {
@@ -183,7 +209,19 @@ async fn exchange(request: &Prepared, options: &SendOptions) -> Result<Response>
             url = next;
             continue;
         }
-        return read(hop, url, redirects, start, options).await;
+        let mut response = read(hop, url, redirects, start, options).await?;
+        response.sent_cookie = sent_cookie;
+        return Ok(response);
+    }
+}
+
+/// Puts the header in place of the first one with that name (or at the end) and drops the
+/// others; `None` drops them all.
+fn set_header(headers: &mut Vec<(String, String)>, name: &str, value: Option<String>) {
+    let at = headers.iter().position(|(n, _)| n.eq_ignore_ascii_case(name));
+    headers.retain(|(n, _)| !n.eq_ignore_ascii_case(name));
+    if let Some(value) = value {
+        headers.insert(at.unwrap_or(headers.len()).min(headers.len()), (name.to_string(), value));
     }
 }
 
@@ -381,5 +419,6 @@ async fn read(hop: Hop, url: Url, redirects: Vec<Redirect>, start: Instant, opti
         remote_addr,
         tls,
         redirects,
+        sent_cookie: None,
     })
 }

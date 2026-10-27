@@ -3,6 +3,9 @@
 //!
 //! The request is stored as written, with `{{variables}}`, so secrets from `*.local.toml` are
 //! not copied out. Values of auth-like headers in the "sent" part are masked.
+//!
+//! Next to it live what the session must remember to keep working: captured values, cookies
+//! and OAuth 2.0 tokens.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -12,6 +15,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tsubamedo_core::Request;
+use tsubamedo_core::cookies::Jar;
+use tsubamedo_core::oauth::Tokens;
 
 /// Bodies up to this size are kept, so an old answer opens again without sending.
 pub const BODY_LIMIT: u64 = 1 << 20;
@@ -180,7 +185,27 @@ impl History {
         fs::write(self.dir.join("captured.json"), serde_json::to_vec_pretty(store)?)
     }
 
-    /// History, kept bodies and captured values.
+    /// Cookie jars by environment (`""` without one).
+    pub fn cookies(&self) -> BTreeMap<String, Jar> {
+        fs::read(self.dir.join("cookies.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    pub fn save_cookies(&self, jars: &BTreeMap<String, Jar>) -> std::io::Result<()> {
+        fs::create_dir_all(&self.dir)?;
+        fs::write(self.dir.join("cookies.json"), serde_json::to_vec_pretty(jars)?)
+    }
+
+    /// OAuth 2.0 tokens, so a sign-in in the browser lasts beyond one start of the app.
+    pub fn tokens(&self) -> Tokens {
+        fs::read(self.dir.join("tokens.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    pub fn save_tokens(&self, tokens: &Tokens) -> std::io::Result<()> {
+        fs::create_dir_all(&self.dir)?;
+        fs::write(self.dir.join("tokens.json"), serde_json::to_vec_pretty(tokens)?)
+    }
+
+    /// History, kept bodies, captured values, cookies and tokens.
     pub fn clear(&self) -> std::io::Result<()> {
         match fs::remove_dir_all(&self.dir) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),

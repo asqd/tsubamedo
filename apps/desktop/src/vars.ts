@@ -49,6 +49,7 @@ export function missingVars(request: Request, vars: VarInfo[]): string[] {
   if (a.type === "basic") texts.push(a.username, a.password);
   if (a.type === "bearer") texts.push(a.token);
   if (a.type === "apikey") texts.push(a.key, a.value);
+  if (a.type === "oauth2") texts.push(a.authUrl, a.tokenUrl, a.clientId, a.clientSecret, a.scope, a.audience, a.redirectUri, a.username, a.password);
   const b = request.body;
   if (b.type === "json" || b.type === "text") texts.push(b.content);
   if (b.type === "form") for (const f of b.fields) if (f.enabled) texts.push(f.name, f.value);

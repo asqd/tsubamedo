@@ -19,6 +19,7 @@ fn response(status: u16, body: &str) -> Response {
         remote_addr: "127.0.0.1:80".parse().unwrap(),
         tls: None,
         redirects: Vec::new(),
+        sent_cookie: None,
     }
 }
 

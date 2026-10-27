@@ -6,7 +6,7 @@
 
 pub mod history;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -17,13 +17,15 @@ use serde_json::{Value, json};
 use tokio::task::AbortHandle;
 use tsubamedo_core::checks::{CheckResult, Captured};
 use tsubamedo_core::collection::{Collection, VarSource};
+use tsubamedo_core::cookies::{Jar, SharedJar};
+use tsubamedo_core::oauth::{self, SharedTokens};
 use tsubamedo_core::run::{self, Event, Exchange, RunOptions, Runner};
 use tsubamedo_core::http::{Redirect, Response, ResponseBody, SendOptions, Timings, TlsInfo};
 use tsubamedo_core::organize;
-use tsubamedo_core::prepare::prepare;
+use tsubamedo_core::prepare::{prepare, render_oauth};
 use tsubamedo_core::request_file::RequestFile;
 use tsubamedo_core::view::{Matcher, TextView};
-use tsubamedo_core::{Request, Vars};
+use tsubamedo_core::{Auth, OAuth2, Request, Vars};
 
 /// Responses kept for the viewer; older ones are dropped with their temporary files.
 const KEEP_RESPONSES: usize = 30;
@@ -51,6 +53,10 @@ struct State {
     view_of: HashMap<(u64, bool), u64>,
     /// Values captured from responses for this collection, by environment.
     captured: history::CapturedStore,
+    /// Cookies of this collection, a jar per environment (`""` without one).
+    jars: BTreeMap<String, SharedJar>,
+    /// OAuth 2.0 tokens of this collection.
+    tokens: SharedTokens,
     next_id: u64,
 }
 
@@ -100,6 +106,23 @@ impl State {
         self.views.retain(|_, (of, _)| *of != response);
         self.view_of.retain(|(of, _), _| *of != response);
     }
+
+    fn jar(&mut self, env: Option<&str>) -> SharedJar {
+        self.jars.entry(env.unwrap_or_default().to_string()).or_insert_with(|| Jar::default().shared()).clone()
+    }
+
+    /// What the session remembers of a collection: captured values, cookies, tokens.
+    fn load(&mut self, history: Option<&history::History>) {
+        let Some(h) = history else {
+            self.captured = Default::default();
+            self.jars = Default::default();
+            self.tokens = Default::default();
+            return;
+        };
+        self.captured = h.captured();
+        self.jars = h.cookies().into_iter().map(|(env, jar)| (env, jar.shared())).collect();
+        self.tokens = h.tokens().shared();
+    }
 }
 
 /// Returns freed memory to the system. The allocator keeps what a big view used for the next
@@ -139,9 +162,8 @@ impl Session {
     /// A session keeping history in `data_dir` (the app's data folder).
     pub fn with_data_dir(data_dir: PathBuf) -> Arc<Self> {
         let session = Session { data_dir: Some(data_dir), ..Session::default() };
-        if let Some(history) = session.history() {
-            session.state.lock().unwrap().captured = history.captured();
-        }
+        let history = session.history();
+        session.state.lock().unwrap().load(history.as_ref());
         Arc::new(session)
     }
 
@@ -231,7 +253,34 @@ impl Session {
                 if let Some(h) = self.history() {
                     h.clear().map_err(|e| e.to_string())?;
                 }
-                self.state.lock().unwrap().captured.clear();
+                self.state.lock().unwrap().load(None);
+                Ok(Value::Null)
+            }
+            "cookies" => {
+                let jar = self.state.lock().unwrap().jar(args::<EnvArg>(a)?.env.as_deref());
+                let list = jar.lock().unwrap().cookies();
+                reply(list)
+            }
+            "deleteCookie" => {
+                let a: CookieArg = args(a)?;
+                let jar = self.state.lock().unwrap().jar(a.env.as_deref());
+                jar.lock().unwrap().remove(&a.domain, &a.path, &a.name);
+                self.save_stores();
+                Ok(Value::Null)
+            }
+            "clearCookies" => {
+                let jar = self.state.lock().unwrap().jar(args::<EnvArg>(a)?.env.as_deref());
+                jar.lock().unwrap().clear();
+                self.save_stores();
+                Ok(Value::Null)
+            }
+            "oauthStatus" => self.oauth_status(args(a)?).await,
+            "oauthToken" => self.oauth_token(args(a)?).await,
+            "oauthForget" => {
+                let a: OAuthArg = args(a)?;
+                let (o, tokens) = self.oauth_settings(&a)?;
+                tokens.lock().await.forget(&o);
+                self.save_stores();
                 Ok(Value::Null)
             }
             other => Err(format!("неизвестная команда {other}")),
@@ -242,10 +291,14 @@ impl Session {
         let path = PathBuf::from(path);
         let collection = Collection::open(&path).map_err(|e| e.to_string())?;
         let info = collection_info(&collection);
-        let captured = self.data_dir.as_ref().map(|data| history::History::open(data, Some(&collection.root)).captured());
+        let history = self.data_dir.as_ref().map(|data| history::History::open(data, Some(&collection.root)));
         let mut state = self.state.lock().unwrap();
+        // The same collection opened again keeps what is in memory: a run may be using it.
+        let same = state.collection.as_ref().is_some_and(|c| c.root == collection.root);
         state.collection = Some(collection);
-        state.captured = captured.unwrap_or_default();
+        if !same {
+            state.load(history.as_ref());
+        }
         reply(info)
     }
 
@@ -431,11 +484,71 @@ impl Session {
 
     /// A runner over the open collection with what earlier responses captured.
     fn runner(&self, env: Option<&str>, insecure: bool) -> Result<Runner, String> {
-        let state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
         let captured: Vars =
             state.captured.get(env.unwrap_or_default()).map(|m| m.iter().map(|(k, v)| (k.clone(), v.value.clone())).collect()).unwrap_or_default();
-        let options = SendOptions { verify_tls: !insecure, ..SendOptions::default() };
-        Runner::new(state.collection.as_ref(), env, Vars::new(), captured, options).map_err(|e| e.to_string())
+        let jar = state.jar(env);
+        let options = SendOptions { verify_tls: !insecure, cookies: Some(jar), ..SendOptions::default() };
+        let runner = Runner::new(state.collection.as_ref(), env, Vars::new(), captured, options).map_err(|e| e.to_string())?;
+        Ok(runner.with_tokens(state.tokens.clone()))
+    }
+
+    /// Cookies and tokens to disk when they changed.
+    fn save_stores(&self) {
+        let Some(history) = self.history() else { return };
+        let state = self.state.lock().unwrap();
+        let mut cookies_changed = false;
+        for jar in state.jars.values() {
+            cookies_changed |= jar.lock().unwrap().take_changed();
+        }
+        if cookies_changed {
+            let jars: BTreeMap<String, Jar> =
+                state.jars.iter().map(|(env, jar)| (env.clone(), jar.lock().unwrap().clone())).filter(|(_, j)| !j.is_empty()).collect();
+            let _ = history.save_cookies(&jars);
+        }
+        // Busy means a request is getting a token right now; it saves when it is done.
+        if let Ok(mut tokens) = state.tokens.try_lock()
+            && tokens.take_changed()
+        {
+            let _ = history.save_tokens(&tokens);
+        }
+    }
+
+    /// The request's OAuth 2.0 settings with variables substituted, and the store they are in.
+    fn oauth_settings(&self, a: &OAuthArg) -> Result<(OAuth2, SharedTokens), String> {
+        let Auth::OAuth2(o) = &a.request.auth else { return Err("у запроса не OAuth 2.0".into()) };
+        let runner = self.runner(a.env.as_deref(), false)?;
+        let o = render_oauth(o, &runner.vars()).map_err(|e| e.to_string())?;
+        Ok((o, self.state.lock().unwrap().tokens.clone()))
+    }
+
+    /// The kept token for the request's settings, if any.
+    async fn oauth_status(&self, a: OAuthArg) -> Reply {
+        let (o, tokens) = match self.oauth_settings(&a) {
+            Ok(found) => found,
+            // Not all variables are set yet: there cannot be a token either.
+            Err(_) => return Ok(Value::Null),
+        };
+        let tokens = tokens.lock().await;
+        Ok(tokens.get(&o).map(token_info).unwrap_or(Value::Null))
+    }
+
+    /// A new token now, as the editor's «Получить токен» asks.
+    async fn oauth_token(self: Arc<Self>, a: OAuthArg) -> Reply {
+        let (o, tokens) = self.oauth_settings(&a)?;
+        let options = SendOptions { verify_tls: !a.insecure, ..SendOptions::default() };
+        let task = tokio::spawn(async move { oauth::token(&o, &tokens, &options, oauth::Mode::New).await });
+        let send_id = a.send_id.clone().unwrap_or_default();
+        self.sends.lock().unwrap().insert(send_id.clone(), task.abort_handle());
+        let result = task.await;
+        self.sends.lock().unwrap().remove(&send_id);
+        let got = match result {
+            Ok(got) => got.map_err(|e| e.to_string())?,
+            Err(e) if e.is_cancelled() => return Err("Отменено".into()),
+            Err(e) => return Err(e.to_string()),
+        };
+        self.save_stores();
+        Ok(token_info(&got.token))
     }
 
     /// Keeps what the exchanges captured, for the next sends and the next start.
@@ -497,7 +610,18 @@ impl Session {
 
     fn curl(&self, a: CurlArg) -> Reply {
         let (vars, dir) = self.context(a.id.as_deref(), a.env.as_deref())?;
-        let prepared = prepare(&a.request, &vars, &dir).map_err(|e| e.to_string())?;
+        let mut prepared = prepare(&a.request, &vars, &dir).map_err(|e| e.to_string())?;
+        // The kept OAuth 2.0 token, so the command works as is while it lasts.
+        if let Some(o) = &prepared.oauth
+            && prepared.header("authorization").is_none()
+        {
+            let tokens = self.state.lock().unwrap().tokens.clone();
+            if let Ok(tokens) = tokens.try_lock()
+                && let Some(token) = tokens.get(o)
+            {
+                prepared.headers.push(("Authorization".into(), token.header()));
+            }
+        }
         Ok(Value::String(tsubamedo_core::curl::to_curl(&prepared, &a.request.body, &vars)))
     }
 
@@ -510,6 +634,7 @@ impl Session {
         self.sends.lock().unwrap().insert(a.send_id.clone(), task.abort_handle());
         let result = task.await;
         self.sends.lock().unwrap().remove(&a.send_id);
+        self.save_stores();
         let mut exchanges = match result {
             Ok(exchanges) => exchanges,
             Err(e) if e.is_cancelled() => return Err("Отменено".into()),
@@ -598,6 +723,7 @@ impl Session {
         self.sends.lock().unwrap().insert(a.send_id.clone(), task.abort_handle());
         let result = task.await;
         self.sends.lock().unwrap().remove(&a.send_id);
+        self.save_stores();
         let progress = self.runs.lock().unwrap().remove(&a.send_id).unwrap_or(Value::Null);
         match result {
             Ok(()) => {}
@@ -741,6 +867,23 @@ impl Session {
     }
 }
 
+/// A token as the editor shows it: never whole.
+fn token_info(t: &oauth::Token) -> Value {
+    let chars: Vec<char> = t.access_token.chars().collect();
+    let preview = if chars.len() > 16 {
+        format!("{}…{}", chars[..8].iter().collect::<String>(), chars[chars.len() - 4..].iter().collect::<String>())
+    } else {
+        "••••".to_string()
+    };
+    json!({
+        "preview": preview,
+        "obtainedAt": t.obtained_at,
+        "expiresAt": t.expires_at,
+        "hasRefresh": t.refresh_token.is_some(),
+        "scope": t.scope,
+    })
+}
+
 fn dirs_home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
 }
@@ -820,6 +963,25 @@ struct HistoryArg {
 #[derive(Deserialize)]
 struct EnvArg {
     env: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CookieArg {
+    env: Option<String>,
+    domain: String,
+    path: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OAuthArg {
+    request: Request,
+    env: Option<String>,
+    /// To cancel a sign-in that waits for the browser.
+    send_id: Option<String>,
+    #[serde(default)]
+    insecure: bool,
 }
 
 /// A request of a run as the window lists it.

@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value, json};
 
 use super::{Environment, Format, Imported, Placed, Var, array_at, file_name, str_at, text};
-use crate::model::{ApiKeyLocation, Auth, Body, Check, Pair, Part, Request};
+use crate::model::{ApiKeyLocation, Auth, Body, Check, ClientAuth, Grant, OAuth2, Pair, Part, Request};
 use crate::organize::clean_name;
 use crate::Result;
 
@@ -221,19 +221,21 @@ impl Spec<'_> {
     /// The operation's security, or the document's: the first scheme of the first requirement.
     fn auth(&mut self, op: &Value, headers: &mut Vec<Pair>) -> Auth {
         let security = op.get("security").or_else(|| self.doc.get("security"));
-        let Some(name) = security
+        let Some((name, scopes)) = security
             .and_then(Value::as_array)
             .and_then(|list| list.first())
             .and_then(Value::as_object)
-            .and_then(|req| req.keys().next())
+            .and_then(|req| req.iter().next())
         else {
             return Auth::None;
         };
+        let scope = scopes.as_array().map(|s| s.iter().map(text).collect::<Vec<_>>().join(" ")).unwrap_or_default();
         let schemes = if self.v2 { self.doc.get("securityDefinitions") } else { self.doc.pointer("/components/securitySchemes") };
         let Some(scheme) = schemes.and_then(|s| s.get(name)).map(|s| self.resolve(s)) else { return Auth::None };
         let var = |n: &str| format!("{{{{{n}}}}}");
         match (str_at(&scheme, "type"), str_at(&scheme, "scheme").to_lowercase().as_str()) {
-            ("http", "bearer") | ("oauth2", _) | ("openIdConnect", _) => Auth::Bearer { token: var("token") },
+            ("oauth2", _) => self.oauth2(&scheme, scope).unwrap_or_else(|| Auth::Bearer { token: var("token") }),
+            ("http", "bearer") | ("openIdConnect", _) => Auth::Bearer { token: var("token") },
             ("http", "basic") | ("basic", _) => Auth::Basic { username: var("username"), password: var("password") },
             ("apiKey", _) => {
                 let key = str_at(&scheme, "name").to_string();
@@ -251,6 +253,40 @@ impl Spec<'_> {
                 Auth::None
             }
         }
+    }
+
+    /// The flow a client can go through on its own: client credentials, then the sign-in,
+    /// then the password. Only implicit — `None`, a bearer token to paste.
+    fn oauth2(&mut self, scheme: &Value, scope: String) -> Option<Auth> {
+        let var = |n: &str| format!("{{{{{n}}}}}");
+        // OpenAPI 3 lists flows; Swagger 2 has one flow with its own names.
+        let flows: Vec<(Grant, Value)> = if self.v2 {
+            let grant = match str_at(scheme, "flow") {
+                "application" => Grant::ClientCredentials,
+                "accessCode" => Grant::AuthorizationCode,
+                "password" => Grant::Password,
+                _ => return None,
+            };
+            vec![(grant, scheme.clone())]
+        } else {
+            [("clientCredentials", Grant::ClientCredentials), ("authorizationCode", Grant::AuthorizationCode), ("password", Grant::Password)]
+                .into_iter()
+                .filter_map(|(name, grant)| Some((grant, scheme.pointer(&format!("/flows/{name}"))?.clone())))
+                .collect()
+        };
+        let (grant, flow) = flows.into_iter().next()?;
+        Some(Auth::OAuth2(OAuth2 {
+            grant,
+            auth_url: str_at(&flow, "authorizationUrl").into(),
+            token_url: str_at(&flow, "tokenUrl").into(),
+            client_id: var("client_id"),
+            client_secret: if grant == Grant::AuthorizationCode { String::new() } else { var("client_secret") },
+            scope,
+            username: if grant == Grant::Password { var("username") } else { String::new() },
+            password: if grant == Grant::Password { var("password") } else { String::new() },
+            client_auth: ClientAuth::Basic,
+            ..OAuth2::default()
+        }))
     }
 
     fn param_example(&mut self, p: &Value) -> Option<String> {

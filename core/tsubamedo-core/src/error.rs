@@ -15,6 +15,8 @@ pub enum Error {
     Invalid(String),
     #[error("{0}")]
     Script(String),
+    #[error("OAuth 2.0: {0}")]
+    OAuth(String),
     #[error("не удалось найти адрес {host}: {reason}")]
     Dns { host: String, reason: String },
     #[error("не удалось подключиться к {target}: {reason}")]

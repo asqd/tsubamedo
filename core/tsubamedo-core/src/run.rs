@@ -13,6 +13,7 @@ use std::time::Duration;
 use crate::checks::{self, Answer, CheckResult, Captured};
 use crate::collection::{Collection, Entry};
 use crate::http::{self, Response, SendOptions};
+use crate::oauth::{self, Mode, SharedTokens, Tokens};
 use crate::prepare::{Prepared, prepare, scripts_variables, variables};
 use crate::scripts;
 use crate::{Error, Request, Result, Vars};
@@ -134,6 +135,8 @@ pub struct Runner {
     options: SendOptions,
     /// For a fork: the captured values it started with, to tell what it brought.
     forked_from: Vars,
+    /// OAuth 2.0 tokens; forks share them.
+    tokens: SharedTokens,
 }
 
 impl Runner {
@@ -142,7 +145,22 @@ impl Runner {
             Some(c) => (c.vars(env, &Vars::new())?, producers(c)),
             None => (Vars::new(), BTreeMap::new()),
         };
-        Ok(Runner { base, overrides, captured, producers, failed: BTreeSet::new(), options, forked_from: Vars::new() })
+        Ok(Runner {
+            base,
+            overrides,
+            captured,
+            producers,
+            failed: BTreeSet::new(),
+            options,
+            forked_from: Vars::new(),
+            tokens: Tokens::default().shared(),
+        })
+    }
+
+    /// Tokens kept from before (the session's), instead of none.
+    pub fn with_tokens(mut self, tokens: SharedTokens) -> Self {
+        self.tokens = tokens;
+        self
     }
 
     pub fn vars(&self) -> Vars {
@@ -336,12 +354,46 @@ impl Runner {
                     break (scripted, prepared);
                 }
             };
-            let prepared = match prepared {
+            let mut prepared = match prepared {
                 Ok(p) => p,
                 Err(e) => return Exchange { id, request, sent: None, result: Err(e), checks: Vec::new(), captures: set_by_script, logs },
             };
+            // A header the user wrote themselves wins over the token.
+            let oauth = prepared.oauth.clone().filter(|_| prepared.header("authorization").is_none());
+            let mut kept_token = false;
+            if let Some(o) = &oauth {
+                match oauth::token(o, &self.tokens, &self.options, Mode::Cached).await {
+                    Ok(got) => {
+                        logs.extend(got.note);
+                        kept_token = !got.fresh;
+                        prepared.headers.push(("Authorization".into(), got.token.header()));
+                    }
+                    Err(e) => return Exchange { id, request, sent: None, result: Err(e), checks: Vec::new(), captures: set_by_script, logs },
+                }
+            }
             let options = self.options.for_request(&prepared);
-            let result = http::send(&prepared, &options).await;
+            let mut result = http::send(&prepared, &options).await;
+            // A kept token the server no longer takes (revoked, the server restarted): once more
+            // with a renewed one.
+            if let Some(o) = &oauth
+                && kept_token
+                && result.as_ref().is_ok_and(|r| r.status == 401)
+            {
+                match oauth::token(o, &self.tokens, &self.options, Mode::Renew).await {
+                    Ok(got) => {
+                        logs.push("OAuth 2.0: сервер не принял сохранённый токен (401), запрос отправлен ещё раз с новым".into());
+                        logs.extend(got.note);
+                        set_authorization(&mut prepared, got.token.header());
+                        result = http::send(&prepared, &options).await;
+                    }
+                    Err(e) => logs.push(format!("сервер не принял сохранённый токен (401), а новый не получен: {e}")),
+                }
+            }
+            // What the jar added goes into what was sent, so the window shows it.
+            if let Ok(Some(cookie)) = result.as_ref().map(|r| r.sent_cookie.clone()) {
+                prepared.headers.retain(|(n, _)| !n.eq_ignore_ascii_case("cookie"));
+                prepared.headers.push(("Cookie".into(), cookie));
+            }
             let (checks, mut captures) = match &result {
                 Ok(response) => self.read(&scripted, &prepared, response, &dir, &mut logs),
                 Err(_) => (Vec::new(), Vec::new()),
@@ -402,6 +454,11 @@ impl Runner {
         results.extend(checks::run_checks(&request.checks, &answer, &self.vars(), Some(dir)));
         (results, captures)
     }
+}
+
+fn set_authorization(prepared: &mut Prepared, value: String) {
+    prepared.headers.retain(|(n, _)| !n.eq_ignore_ascii_case("authorization"));
+    prepared.headers.push(("Authorization".into(), value));
 }
 
 async fn attempt(mut runner: Runner, step: Step, i: usize, pause: Duration) -> (usize, Runner, Vec<Exchange>) {

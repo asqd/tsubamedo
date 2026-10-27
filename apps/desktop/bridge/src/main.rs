@@ -1,6 +1,7 @@
 //! Dev only: the app's single `call` command over HTTP, so the interface runs in a plain browser
 //! against the real core (`make bridge`, then http://localhost:1430/bridge.html). Only the
-//! Vite dev origin may call it. Native dialogs are stand-ins in the page itself.
+//! Vite dev origin may call it. Native dialogs are stand-ins in the page itself. History goes to
+//! `$TSUBAMEDO_BRIDGE_DATA` (default `/tmp/tsubamedo-bridge`), not the app's data folder.
 
 use std::sync::Arc;
 
@@ -16,7 +17,8 @@ const ORIGINS: [&str; 2] = ["http://localhost:1430", "http://127.0.0.1:1430"];
 async fn main() {
     let listener = TcpListener::bind(ADDR).await.expect("port 1431 is busy");
     eprintln!("tsubamedo-bridge: http://{ADDR}, open http://localhost:1430/bridge.html");
-    let session = Session::new();
+    let data = std::env::var_os("TSUBAMEDO_BRIDGE_DATA").map_or_else(|| "/tmp/tsubamedo-bridge".into(), std::path::PathBuf::from);
+    let session = Session::with_data_dir(data);
     loop {
         let Ok((stream, _)) = listener.accept().await else { continue };
         let session = session.clone();

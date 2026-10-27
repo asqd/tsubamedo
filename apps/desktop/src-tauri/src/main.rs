@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use tauri::State;
+use tauri::{Manager, State};
 use tsubamedo_session::Session;
 
 #[tauri::command]
@@ -66,7 +66,11 @@ fn main() {
     let builder = builder.menu(menu);
     builder
         .plugin(tauri_plugin_dialog::init())
-        .manage(Session::new())
+        .setup(|app| {
+            // History lives in ~/Library/Application Support/app.tsubamedo.TsubameDo.
+            app.manage(Session::with_data_dir(app.path().app_data_dir()?));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![call])
         .run(tauri::generate_context!())
         .expect("TsubameDo failed to start");

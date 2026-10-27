@@ -29,6 +29,8 @@ pub struct Collection {
     pub root: PathBuf,
     pub name: String,
     pub requests: Vec<Entry>,
+    /// Every folder, empty ones too, as paths from the root: `orders`, `orders/archive`.
+    pub folders: Vec<String>,
     /// Files that could not be read; the rest of the collection still works.
     pub broken: Vec<Error>,
 }
@@ -71,7 +73,7 @@ impl Collection {
             .map(str::to_string)
             .or_else(|| root.canonicalize().ok()?.file_name().map(|n| n.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "Коллекция".into());
-        let mut collection = Collection { root: root.clone(), name, requests: Vec::new(), broken: Vec::new() };
+        let mut collection = Collection { root: root.clone(), name, requests: Vec::new(), folders: Vec::new(), broken: Vec::new() };
         collection.walk(&root, true);
         Ok(collection)
     }
@@ -167,6 +169,8 @@ impl Collection {
             }
             if path.is_dir() {
                 if !(top && name == ENV_DIR) {
+                    let rel = path.strip_prefix(&self.root).unwrap_or(&path);
+                    self.folders.push(rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"));
                     self.walk(&path, false);
                 }
                 continue;

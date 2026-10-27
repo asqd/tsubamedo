@@ -40,7 +40,8 @@ async fn edit_send_and_view_a_big_json() {
     std::fs::write(dir.path().join("tsubamedo.toml"), "name = \"Тест\"\n").unwrap();
     std::fs::create_dir(dir.path().join("env")).unwrap();
     std::fs::write(dir.path().join("env/local.toml"), format!("[vars]\nbase = \"{base}\"\n")).unwrap();
-    let s = Session::new();
+    let data = tempfile::tempdir().unwrap();
+    let s = Session::with_data_dir(data.path().to_path_buf());
     let info = call(&s, "openCollection", json!({ "path": dir.path() })).await;
     assert_eq!(info["environments"], json!(["local"]));
 
@@ -77,4 +78,24 @@ async fn edit_send_and_view_a_big_json() {
     assert_eq!(curl, json!(format!("curl \\\n  '{base}/tours' \\\n  -H 'Accept: application/json' \\\n  -L")));
     let imported = call(&s, "importCurl", json!({ "text": curl })).await;
     assert_eq!(imported["url"], json!(format!("{base}/tours")));
+
+    // History: the send that went out, with its body. The one stopped by a missing variable
+    // never left, so it is not there.
+    let history = call(&s, "history", json!({ "requestId": id })).await;
+    assert_eq!(history.as_array().unwrap().len(), 1);
+    assert_eq!((history[0]["status"].as_u64(), history[0]["hasBody"].as_bool()), (Some(200), Some(true)));
+    let old = call(&s, "openHistory", json!({ "id": history[0]["id"] })).await;
+    assert_eq!(old["request"]["url"], json!("{{base}}/tours"));
+    let view = call(&s, "view", json!({ "responseId": old["response"]["responseId"], "pretty": true })).await;
+    assert_eq!(view["lines"], json!(2 + 3000 * 4));
+
+    // Renaming and moving keep the history attached to the request.
+    let renamed = call(&s, "renameRequest", json!({ "id": id, "name": "Все туры" })).await;
+    assert_eq!(renamed["id"], json!("tours/Все туры"));
+    let moved = call(&s, "moveFolder", json!({ "folder": "tours", "parent": call(&s, "createFolder", json!({ "folder": "", "name": "Архив" })).await["id"] })).await;
+    assert_eq!(moved["id"], json!("Архив/tours"));
+    assert_eq!(moved["collection"]["folders"], json!(["Архив", "Архив/tours"]));
+    assert_eq!(call(&s, "history", json!({ "requestId": "Архив/tours/Все туры" })).await.as_array().unwrap().len(), 1);
+    call(&s, "clearHistory", json!({})).await;
+    assert_eq!(call(&s, "history", json!({})).await, json!([]));
 }

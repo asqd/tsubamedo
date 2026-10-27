@@ -4,6 +4,8 @@
 //! [`Session::call`], so they cannot drift apart. Arguments and results are JSON in camelCase,
 //! mirrored by `apps/desktop/src/api.ts`.
 
+pub mod history;
+
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -14,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::task::AbortHandle;
 use tsubamedo_core::collection::Collection;
-use tsubamedo_core::http::{self, Redirect, Response, SendOptions, Timings, TlsInfo};
+use tsubamedo_core::http::{self, Redirect, Response, ResponseBody, SendOptions, Timings, TlsInfo};
+use tsubamedo_core::organize;
 use tsubamedo_core::prepare::prepare;
 use tsubamedo_core::request_file::RequestFile;
 use tsubamedo_core::view::{Matcher, TextView};
@@ -29,12 +32,15 @@ const TEXT_LIMIT: u64 = 20 << 20;
 pub struct Session {
     state: Mutex<State>,
     sends: Mutex<HashMap<String, AbortHandle>>,
+    /// Where history is kept; without it nothing is remembered between runs.
+    data_dir: Option<PathBuf>,
 }
 
 #[derive(Default)]
 struct State {
     collection: Option<Collection>,
-    responses: VecDeque<(u64, Arc<Response>)>,
+    /// Bodies of recent responses (sent now or opened from history) for the viewer.
+    responses: VecDeque<(u64, ResponseBody)>,
     views: HashMap<u64, Arc<TextView>>,
     /// `(response, pretty)` → view, so switching modes back and forth costs nothing.
     view_of: HashMap<(u64, bool), u64>,
@@ -47,7 +53,7 @@ impl State {
         self.next_id
     }
 
-    fn response(&self, id: u64) -> Result<Arc<Response>, String> {
+    fn body(&self, id: u64) -> Result<ResponseBody, String> {
         self.responses
             .iter()
             .find(|(i, _)| *i == id)
@@ -57,6 +63,21 @@ impl State {
 
     fn collection(&self) -> Result<&Collection, String> {
         self.collection.as_ref().ok_or_else(|| "коллекция не открыта".into())
+    }
+
+    /// Keeps a body for the viewer and drops the oldest ones with their views.
+    fn keep_body(&mut self, body: ResponseBody) -> u64 {
+        let id = self.id();
+        self.responses.push_back((id, body));
+        while self.responses.len() > KEEP_RESPONSES {
+            let (old, _) = self.responses.pop_front().unwrap();
+            for pretty in [false, true] {
+                if let Some(view) = self.view_of.remove(&(old, pretty)) {
+                    self.views.remove(&view);
+                }
+            }
+        }
+        id
     }
 }
 
@@ -76,8 +97,20 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Sen
 }
 
 impl Session {
+    /// A session that remembers nothing between runs (tests).
     pub fn new() -> Arc<Self> {
         Arc::new(Session::default())
+    }
+
+    /// A session keeping history in `data_dir` (the app's data folder).
+    pub fn with_data_dir(data_dir: PathBuf) -> Arc<Self> {
+        Arc::new(Session { data_dir: Some(data_dir), ..Session::default() })
+    }
+
+    fn history(&self) -> Option<history::History> {
+        let data = self.data_dir.as_ref()?;
+        let root = self.state.lock().unwrap().collection.as_ref().map(|c| c.root.clone());
+        Some(history::History::open(data, root.as_deref()))
     }
 
     pub async fn call(self: Arc<Self>, method: &str, a: Value) -> Reply {
@@ -106,6 +139,46 @@ impl Session {
             "viewFolds" => self.view_folds(args(a)?),
             "bodyText" => self.body_text(args(a)?).await,
             "saveBody" => self.save_body(args(a)?).await,
+            "renameRequest" => {
+                let a: RenameArg = args(a)?;
+                self.reorganize(Some(a.id.clone()), |root| organize::rename_request(root, &a.id, &a.name))
+            }
+            "moveRequest" => {
+                let a: MoveArg = args(a)?;
+                self.reorganize(Some(a.id.clone()), |root| organize::move_request(root, &a.id, &a.folder))
+            }
+            "duplicateRequest" => {
+                let a: IdArg = args(a)?;
+                self.reorganize(None, |root| organize::duplicate_request(root, &a.id))
+            }
+            "deleteRequest" => {
+                let a: IdArg = args(a)?;
+                self.reorganize(None, |root| organize::delete_request(root, &a.id).map(|()| String::new()))
+            }
+            "createFolder" => {
+                let a: FolderNameArg = args(a)?;
+                self.reorganize(None, |root| organize::create_folder(root, &a.folder, &a.name))
+            }
+            "renameFolder" => {
+                let a: FolderNameArg = args(a)?;
+                self.reorganize(Some(a.folder.clone()), |root| organize::rename_folder(root, &a.folder, &a.name))
+            }
+            "moveFolder" => {
+                let a: MoveFolderArg = args(a)?;
+                self.reorganize(Some(a.folder.clone()), |root| organize::move_folder(root, &a.folder, &a.parent))
+            }
+            "deleteFolder" => {
+                let a: FolderArg = args(a)?;
+                self.reorganize(None, |root| organize::delete_folder(root, &a.folder).map(|()| String::new()))
+            }
+            "history" => self.list_history(args(a)?),
+            "openHistory" => self.open_history(args::<IdArg>(a)?.id),
+            "clearHistory" => {
+                if let Some(h) = self.history() {
+                    h.clear().map_err(|e| e.to_string())?;
+                }
+                Ok(Value::Null)
+            }
             other => Err(format!("неизвестная команда {other}")),
         }
     }
@@ -155,6 +228,108 @@ impl Session {
         Ok(json!({ "id": id, "collection": info }))
     }
 
+    /// A file operation on the collection, then the collection read again. `old` is the id the
+    /// operation renames, so history follows the request to its new name.
+    fn reorganize(&self, old: Option<String>, op: impl FnOnce(&Path) -> tsubamedo_core::Result<String>) -> Reply {
+        let root = self.state.lock().unwrap().collection()?.root.clone();
+        let new = op(&root).map_err(|e| e.to_string())?;
+        if let (Some(old), Some(history)) = (old, self.history())
+            && old != new
+        {
+            history.rename(&old, &new).map_err(|e| e.to_string())?;
+        }
+        let info = self.open_collection(root.to_string_lossy().into_owned())?;
+        Ok(json!({ "id": new, "collection": info }))
+    }
+
+    fn list_history(&self, a: HistoryArg) -> Reply {
+        let Some(history) = self.history() else { return Ok(json!([])) };
+        let entries: Vec<Value> = history
+            .list(a.request_id.as_deref(), 300)
+            .into_iter()
+            .map(|e| {
+                json!({
+                    "id": e.id,
+                    "at": e.at,
+                    "requestId": e.request_id,
+                    "env": e.env,
+                    "method": e.request.method.to_ascii_uppercase(),
+                    "url": e.request.url,
+                    "name": e.request.name,
+                    "status": e.status,
+                    "error": e.error,
+                    "totalMs": e.total_ms,
+                    "size": e.size,
+                    "hasBody": e.has_body,
+                })
+            })
+            .collect();
+        Ok(Value::Array(entries))
+    }
+
+    /// An old exchange back in the window: its request and, when the body was kept, its answer.
+    fn open_history(&self, id: String) -> Reply {
+        let history = self.history().ok_or("история не ведётся")?;
+        let (entry, body) = history.get(&id).ok_or("этой записи в истории уже нет")?;
+        let response = match (entry.meta, body) {
+            (Some(mut meta), Some(body)) => {
+                let response_id = self.state.lock().unwrap().keep_body(ResponseBody::Memory(body.into()));
+                meta["responseId"] = json!(response_id);
+                meta
+            }
+            _ => Value::Null,
+        };
+        Ok(json!({
+            "requestId": entry.request_id,
+            "env": entry.env,
+            "request": entry.request,
+            "response": response,
+            "status": entry.status,
+            "error": entry.error,
+            "at": entry.at,
+        }))
+    }
+
+    fn record(&self, a: &SendArg, outcome: Result<(&ResponseMeta, &ResponseBody), &str>) {
+        let Some(history) = self.history() else { return };
+        let at = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+        let id = format!("{at}-{}", self.state.lock().unwrap().id());
+        let mut entry = history::Entry {
+            id,
+            at,
+            request_id: a.id.clone(),
+            env: a.env.clone(),
+            request: a.request.clone(),
+            status: None,
+            error: None,
+            total_ms: None,
+            size: None,
+            has_body: false,
+            meta: None,
+        };
+        let mut body_bytes = None;
+        match outcome {
+            Ok((meta, body)) => {
+                entry.status = Some(meta.status);
+                entry.total_ms = Some(meta.timings.total.as_secs_f64() * 1000.0);
+                entry.size = Some(body.len());
+                let mut value = serde_json::to_value(meta).unwrap_or(Value::Null);
+                history::mask_secrets(&mut value);
+                entry.meta = Some(value);
+                if body.len() <= history::BODY_LIMIT {
+                    let mut bytes = Vec::new();
+                    if body.reader().and_then(|mut r| std::io::copy(&mut r, &mut bytes)).is_ok() {
+                        entry.has_body = true;
+                        body_bytes = Some(bytes);
+                    }
+                }
+            }
+            Err(error) => entry.error = Some(error.to_string()),
+        }
+        // History is a convenience: failing to write it must not fail the request.
+        let _ = history.add(&entry, body_bytes.as_deref());
+    }
+
     fn vars(&self, env: Option<String>) -> Reply {
         let state = self.state.lock().unwrap();
         match &state.collection {
@@ -201,43 +376,39 @@ impl Session {
         let result = task.await;
         self.sends.lock().unwrap().remove(&a.send_id);
         let response = match result {
-            Ok(r) => r.map_err(|e| e.to_string())?,
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => {
+                let message = e.to_string();
+                self.record(&a, Err(&message));
+                return Err(message);
+            }
             Err(e) if e.is_cancelled() => return Err("Отменено".into()),
             Err(e) => return Err(e.to_string()),
         };
 
-        let mut state = self.state.lock().unwrap();
-        let id = state.id();
+        let id = self.state.lock().unwrap().keep_body(response.body.clone());
         let meta = ResponseMeta::new(id, &response, sent);
-        state.responses.push_back((id, Arc::new(response)));
-        while state.responses.len() > KEEP_RESPONSES {
-            let (old, _) = state.responses.pop_front().unwrap();
-            for pretty in [false, true] {
-                if let Some(view) = state.view_of.remove(&(old, pretty)) {
-                    state.views.remove(&view);
-                }
-            }
-        }
+        self.record(&a, Ok((&meta, &response.body)));
         reply(meta)
     }
 
     async fn view(self: Arc<Self>, a: ViewArg) -> Reply {
-        let (response, cached) = {
+        let (body, cached) = {
             let state = self.state.lock().unwrap();
             let cached = state.view_of.get(&(a.response_id, a.pretty)).and_then(|id| Some((*id, state.views.get(id)?.clone())));
-            (state.response(a.response_id)?, cached)
+            (state.body(a.response_id)?, cached)
         };
         let (id, view, note) = match cached {
             Some((id, view)) => (id, view, None),
             None => {
                 let pretty = a.pretty;
                 let (view, note) = blocking(move || {
-                    let raw = || TextView::raw(&response.body).map_err(|e| e.to_string());
+                    let raw = || TextView::raw(&body).map_err(|e| e.to_string());
                     if !pretty {
                         return Ok((raw()?, None));
                     }
                     let defaults = SendOptions::default();
-                    match TextView::pretty_json(&response.body, defaults.spill_threshold, defaults.spill_dir) {
+                    match TextView::pretty_json(&body, defaults.spill_threshold, defaults.spill_dir) {
                         Ok(Ok(view)) => Ok((view, None)),
                         Ok(Err(reason)) => Ok((raw()?, Some(format!("Не JSON ({reason}), показано как есть")))),
                         Err(e) => Err(e.to_string()),
@@ -316,8 +487,8 @@ impl Session {
             Some(id) => Some(self.get_view(id)?),
             None => None,
         };
-        let response = self.state.lock().unwrap().response(a.response_id)?;
-        let size = view.as_ref().map_or(response.body.len(), |v| v.len());
+        let body = self.state.lock().unwrap().body(a.response_id)?;
+        let size = view.as_ref().map_or(body.len(), |v| v.len());
         if size > TEXT_LIMIT {
             return Err(format!("ответ слишком большой для буфера обмена ({} МБ), сохраните его в файл", size >> 20));
         }
@@ -326,7 +497,7 @@ impl Session {
             match view {
                 Some(view) => view.write_to(&mut out).map_err(|e| e.to_string())?,
                 None => {
-                    std::io::copy(&mut response.body.reader().map_err(|e| e.to_string())?, &mut out).map_err(|e| e.to_string())?;
+                    std::io::copy(&mut body.reader().map_err(|e| e.to_string())?, &mut out).map_err(|e| e.to_string())?;
                 }
             }
             Ok(Value::String(String::from_utf8_lossy(&out).into_owned()))
@@ -339,14 +510,14 @@ impl Session {
             Some(id) => Some(self.get_view(id)?),
             None => None,
         };
-        let response = self.state.lock().unwrap().response(a.response_id)?;
+        let body = self.state.lock().unwrap().body(a.response_id)?;
         blocking(move || {
             let path = Path::new(&a.path);
             let mut file = std::io::BufWriter::new(std::fs::File::create(path).map_err(|e| e.to_string())?);
             match view {
                 Some(view) => view.write_to(&mut file).map_err(|e| e.to_string())?,
                 None => {
-                    std::io::copy(&mut response.body.reader().map_err(|e| e.to_string())?, &mut file).map_err(|e| e.to_string())?;
+                    std::io::copy(&mut body.reader().map_err(|e| e.to_string())?, &mut file).map_err(|e| e.to_string())?;
                 }
             }
             Ok(Value::Null)
@@ -364,6 +535,7 @@ fn collection_info(c: &Collection) -> CollectionInfo {
         root: c.root.to_string_lossy().into_owned(),
         name: c.name.clone(),
         environments: c.environments(),
+        folders: c.folders.clone(),
         requests: c
             .requests
             .iter()
@@ -392,6 +564,42 @@ struct IdArg {
 #[serde(rename_all = "camelCase")]
 struct SendIdArg {
     send_id: String,
+}
+
+#[derive(Deserialize)]
+struct RenameArg {
+    id: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct MoveArg {
+    id: String,
+    folder: String,
+}
+
+#[derive(Deserialize)]
+struct FolderArg {
+    folder: String,
+}
+
+#[derive(Deserialize)]
+struct FolderNameArg {
+    #[serde(default)]
+    folder: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct MoveFolderArg {
+    folder: String,
+    parent: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryArg {
+    request_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -489,6 +697,7 @@ struct CollectionInfo {
     root: String,
     name: String,
     environments: Vec<String>,
+    folders: Vec<String>,
     requests: Vec<RequestItem>,
     broken: Vec<String>,
 }

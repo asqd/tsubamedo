@@ -3,6 +3,7 @@
 //! - [`model`] — a request as the user edits it, with `{{variables}}` still in place.
 //! - [`request_file`] — one request per TOML file; saving rewrites only what changed.
 //! - [`curl`] — `curl …` commands in and out.
+//! - [`organize`] — renaming, moving and deleting requests and folders (to the Trash).
 //! - [`collection`] — a folder of request files, environments and their variables.
 //! - [`prepare`] — variables substituted, auth and body turned into bytes and headers.
 //! - [`http`] — sending with a time for every phase; big bodies go to a temporary file.
@@ -13,6 +14,7 @@ pub mod curl;
 pub mod error;
 pub mod http;
 pub mod model;
+pub mod organize;
 pub mod prepare;
 pub mod request_file;
 pub mod template;

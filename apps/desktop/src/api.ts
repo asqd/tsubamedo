@@ -59,6 +59,8 @@ export interface CollectionInfo {
   root: string;
   name: string;
   environments: string[];
+  /** Every folder, empty ones too: `orders`, `orders/archive`. */
+  folders: string[];
   requests: RequestItem[];
   broken: string[];
 }
@@ -115,6 +117,39 @@ export interface SearchResult {
   capped: boolean;
 }
 
+/** The result of a file operation: the new id (empty when something was deleted). */
+export interface Reorganized {
+  id: string;
+  collection: CollectionInfo;
+}
+
+export interface HistoryItem {
+  id: string;
+  /** Unix milliseconds. */
+  at: number;
+  requestId: string | null;
+  env: string | null;
+  method: string;
+  url: string;
+  name: string | null;
+  status: number | null;
+  error: string | null;
+  totalMs: number | null;
+  size: number | null;
+  hasBody: boolean;
+}
+
+export interface HistoryEntry {
+  requestId: string | null;
+  env: string | null;
+  request: Request;
+  /** Null when the body was not kept (over 1 MB) or the request failed. */
+  response: ResponseMeta | null;
+  status: number | null;
+  error: string | null;
+  at: number;
+}
+
 export async function call<T>(method: string, args: object = {}): Promise<T> {
   const bridge = window.__TSUBAMEDO_BRIDGE__;
   if (bridge) {
@@ -144,6 +179,17 @@ export const api = {
   send: (sendId: string, id: string | null, request: Request, env: string | null, insecure: boolean) =>
     call<ResponseMeta>("send", { sendId, id, request, env, insecure }),
   cancel: (sendId: string) => call<null>("cancel", { sendId }),
+  renameRequest: (id: string, name: string) => call<Reorganized>("renameRequest", { id, name }),
+  moveRequest: (id: string, folder: string) => call<Reorganized>("moveRequest", { id, folder }),
+  duplicateRequest: (id: string) => call<Reorganized>("duplicateRequest", { id }),
+  deleteRequest: (id: string) => call<Reorganized>("deleteRequest", { id }),
+  createFolder: (folder: string, name: string) => call<Reorganized>("createFolder", { folder, name }),
+  renameFolder: (folder: string, name: string) => call<Reorganized>("renameFolder", { folder, name }),
+  moveFolder: (folder: string, parent: string) => call<Reorganized>("moveFolder", { folder, parent }),
+  deleteFolder: (folder: string) => call<Reorganized>("deleteFolder", { folder }),
+  history: (requestId: string | null) => call<HistoryItem[]>("history", { requestId }),
+  openHistory: (id: string) => call<HistoryEntry>("openHistory", { id }),
+  clearHistory: () => call<null>("clearHistory"),
   vars: (env: string | null) => call<VarInfo[]>("vars", { env }),
   importCurl: (text: string) => call<Request>("importCurl", { text }),
   curl: (id: string | null, request: Request, env: string | null) => call<string>("curl", { id, request, env }),

@@ -1,10 +1,11 @@
 // The window: collection on the left, tabs of open requests, each with its request and answer.
 // Edits are saved to the request's file as you type; the core rewrites only what changed.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, CollectionInfo, emptyRequest, Request } from "./api";
+import { api, CollectionInfo, emptyRequest, Reorganized, Request } from "./api";
 import { Logo } from "./components/Logo";
 import { RequestEditor } from "./components/RequestEditor";
 import { ResponsePane } from "./components/ResponsePane";
+import { Kind, TreeOps } from "./components/RequestTree";
 import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { Tab } from "./tabs";
@@ -56,6 +57,8 @@ export default function App() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [split, setSplit] = useState(() => Number(store.get("split")) || 0.46);
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const [renameTarget, setRenameTarget] = useState<{ kind: Kind; path: string; n: number } | null>(null);
 
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
@@ -214,18 +217,24 @@ export default function App() {
     setActive(fresh.key);
   };
 
-  const closeTab = async (key: string) => {
-    await flushSave();
+  /** Closes tabs; the window always keeps at least one. */
+  const closeTabs = (keys: string[]) => {
+    if (keys.length === 0) return;
     const all = tabsRef.current;
-    const i = all.findIndex((t) => t.key === key);
-    const closing = all[i];
-    if (!closing) return;
-    if (closing.sendId) api.cancel(closing.sendId);
-    if (closing.id === null) store.set(`scratch:${key}`, null);
-    const rest = all.filter((t) => t.key !== key);
+    for (const t of all.filter((t) => keys.includes(t.key))) {
+      if (t.sendId) api.cancel(t.sendId);
+      if (t.id === null) store.set(`scratch:${t.key}`, null);
+    }
+    const first = all.findIndex((t) => keys.includes(t.key));
+    const rest = all.filter((t) => !keys.includes(t.key));
     if (rest.length === 0) rest.push(scratchTab());
     setTabs(rest);
-    if (key === active) setActive(rest[Math.min(i, rest.length - 1)].key);
+    if (keys.includes(active)) setActive(rest[Math.min(first, rest.length - 1)].key);
+  };
+
+  const closeTab = async (key: string) => {
+    await flushSave();
+    closeTabs([key]);
   };
 
   const change = (next: Request) => {
@@ -249,9 +258,11 @@ export default function App() {
     try {
       const meta = await api.send(sendId, current.id, current.request, env, false);
       patchTab(current.key, { response: meta, sendId: null });
+      setHistoryVersion((v) => v + 1);
     } catch (e) {
       const message = (e as Error).message;
       patchTab(current.key, { sendId: null, error: message === "Отменено" ? null : message });
+      setHistoryVersion((v) => v + 1);
     }
   }, [active, flushSave, patchTab, env]);
 
@@ -284,15 +295,108 @@ export default function App() {
     if (path) openCollection(path);
   };
 
+  /** After a file operation: the new collection, open tabs following their files. */
+  const applyReorganized = async (result: Reorganized, remap: (id: string) => string | null) => {
+    setCollection(result.collection);
+    const gone: string[] = [];
+    for (const t of tabsRef.current) {
+      if (!t.id) continue;
+      const next = remap(t.id);
+      if (next === null) gone.push(t.key);
+      else if (next !== t.id || next === result.id) {
+        const request = await api.getRequest(next).catch(() => t.request);
+        patchTab(t.key, { id: next, request });
+      }
+    }
+    closeTabs(gone);
+  };
+
+  const exact = (old: string, next: string | null) => (id: string) => (id === old ? next : id);
+  const under = (old: string, next: string | null) => (id: string) => (id.startsWith(`${old}/`) ? (next === null ? null : next + id.slice(old.length)) : id);
+
+  const openNew = async (id: string) => {
+    const request = await api.getRequest(id);
+    const fresh: Tab = { key: newKey(), id, request, response: null, error: null, sendId: null, pristine: false };
+    setTabs((all) => [...all, fresh]);
+    setActive(fresh.key);
+  };
+
+  /** Runs a file operation with saving flushed first and errors shown. */
+  const guarded = async <T,>(op: () => Promise<T>): Promise<T | null> => {
+    await flushSave();
+    try {
+      return await op();
+    } catch (e) {
+      setProblem((e as Error).message);
+      return null;
+    }
+  };
+
+  const ops: TreeOps = {
+    newRequest: async (folder) =>
+      guarded(async () => {
+        const { id, collection: info } = await api.createRequest(folder, "Новый запрос");
+        setCollection(info);
+        await openNew(id);
+        setRenameTarget({ kind: "request", path: id, n: Date.now() });
+        return id;
+      }),
+    newFolder: async (parent) =>
+      guarded(async () => {
+        const result = await api.createFolder(parent, "Новая папка");
+        setCollection(result.collection);
+        setRenameTarget({ kind: "folder", path: result.id, n: Date.now() });
+        return result.id;
+      }),
+    rename: async (kind, path, name) => {
+      await guarded(async () => {
+        const result = kind === "request" ? await api.renameRequest(path, name) : await api.renameFolder(path, name);
+        await applyReorganized(result, kind === "request" ? exact(path, result.id) : under(path, result.id));
+      });
+    },
+    move: async (kind, path, folder) => {
+      await guarded(async () => {
+        const result = kind === "request" ? await api.moveRequest(path, folder) : await api.moveFolder(path, folder);
+        await applyReorganized(result, kind === "request" ? exact(path, result.id) : under(path, result.id));
+      });
+    },
+    duplicate: async (id) => {
+      await guarded(async () => {
+        const result = await api.duplicateRequest(id);
+        setCollection(result.collection);
+        await openNew(result.id);
+      });
+    },
+    remove: async (kind, path) => {
+      await guarded(async () => {
+        if (pendingSave.current?.id === path) pendingSave.current = null;
+        const result = kind === "request" ? await api.deleteRequest(path) : await api.deleteFolder(path);
+        await applyReorganized(result, kind === "request" ? exact(path, null) : under(path, null));
+        flash({ text: kind === "request" ? "Запрос перемещён в Корзину" : "Папка перемещена в Корзину" });
+      });
+    },
+  };
+
   const create = async () => {
     if (!collection) return newScratch();
-    await flushSave();
     const folder = tab.id?.includes("/") ? tab.id.slice(0, tab.id.lastIndexOf("/")) : "";
+    await ops.newRequest(folder);
+  };
+
+  /** An old exchange as a scratch tab: the request as it was, the answer if it was kept. */
+  const openHistory = async (entryId: string) => {
+    await flushSave();
     try {
-      const { id, collection: info } = await api.createRequest(folder, "Новый запрос");
-      setCollection(info);
-      const request = await api.getRequest(id);
-      const fresh: Tab = { key: newKey(), id, request, response: null, error: null, sendId: null, pristine: false };
+      const entry = await api.openHistory(entryId);
+      const when = new Date(entry.at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+      const title = entry.request.name ?? entry.requestId?.split("/").pop() ?? entry.request.url;
+      const fresh = scratchTab();
+      fresh.request = { ...entry.request, name: `${title} · ${when}` };
+      fresh.response = entry.response;
+      fresh.error = entry.response
+        ? null
+        : entry.error ?? `Ответ ${entry.status ?? ""} пришёл ${when}, но его тело больше 1 МБ и не сохранялось. Отправьте запрос ещё раз.`;
+      store.set(`scratch:${fresh.key}`, JSON.stringify(fresh.request));
       setTabs((all) => [...all, fresh]);
       setActive(fresh.key);
     } catch (e) {
@@ -419,7 +523,17 @@ export default function App() {
           </div>
         )}
         <div className="main">
-          <Sidebar collection={collection} selected={tab.id} onSelect={openRequest} onOpen={open} onCreate={create} onReload={reload} />
+          <Sidebar
+            collection={collection}
+            selected={tab.id}
+            onSelect={openRequest}
+            onOpen={open}
+            onReload={reload}
+            ops={ops}
+            renameTarget={renameTarget}
+            historyVersion={historyVersion}
+            onOpenHistory={openHistory}
+          />
           <div className="workspace">
             <TabBar tabs={tabs} active={tab.key} onSelect={activate} onClose={closeTab} onNew={newScratch} />
             <div className="work">

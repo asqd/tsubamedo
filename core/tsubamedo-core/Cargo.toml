@@ -34,6 +34,7 @@ serde_json_path = "0.7"
 serde_json.workspace = true
 rquickjs = "0.14.0"
 ring = "0.17"
+serde_yaml_ng = "0.10"
 
 [dev-dependencies]
 hyper = { version = "1", features = ["server", "http1"] }

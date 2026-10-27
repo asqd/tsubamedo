@@ -147,7 +147,12 @@ Postman. У нас — точечное сохранение файлов без
 
 ## Этап 3. Импорт и протоколы
 
-- [ ] Импорт коллекций Insomnia и Postman, OpenAPI, HAR.
+- [x] Импорт: Insomnia (v4 JSON, v5 YAML), Postman (коллекции v2.0/2.1, окружения,
+      глобальные), OpenAPI 3 и Swagger 2, HAR. Теги `{% response %}` Insomnia → `[capture]`;
+      скрипты Postman и Insomnia работают через `pm`/`insomnia`/`CryptoJS` поверх нашего API.
+      `tsubamedo import` и ⇣ в приложении (новой коллекцией или папкой в открытую).
+- [ ] Импорт: OAuth 2.0 и digest (ждут этапа 4), `pm.cookies`, `$random*` из Postman,
+      внешние `$ref` в OpenAPI.
 - [ ] GraphQL: схема через introspection, автодополнение, переменные.
 - [ ] WebSocket и SSE.
 - [ ] gRPC через reflection и `.proto`.

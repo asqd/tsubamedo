@@ -168,6 +168,22 @@ export interface SearchResult {
 }
 
 /** The result of a file operation: the new id (empty when something was deleted). */
+export interface ImportPreview {
+  /** «Insomnia», «коллекция Postman», «OpenAPI»… */
+  format: string;
+  name: string;
+  requests: number;
+  folders: number;
+  environments: string[];
+  vars: number;
+  warnings: string[];
+}
+
+export interface Imported {
+  written: { root: string; folder: string; requests: number; environments: string[]; kept: string[] };
+  collection: CollectionInfo;
+}
+
 export interface Reorganized {
   id: string;
   collection: CollectionInfo;
@@ -241,6 +257,9 @@ export const api = {
   openHistory: (id: string) => call<HistoryEntry>("openHistory", { id }),
   clearHistory: () => call<null>("clearHistory"),
   vars: (env: string | null) => call<VarInfo[]>("vars", { env }),
+  importPreview: (path: string) => call<ImportPreview>("importPreview", { path }),
+  /** `parent` makes a new collection there; without it the file goes into the open one. */
+  importCollection: (path: string, parent: string | null) => call<Imported>("importCollection", { path, parent }),
   importCurl: (text: string) => call<Request>("importCurl", { text }),
   curl: (id: string | null, request: Request, env: string | null) => call<string>("curl", { id, request, env }),
   /** Lets the core drop the bodies of responses up to `seen` that no tab shows. */

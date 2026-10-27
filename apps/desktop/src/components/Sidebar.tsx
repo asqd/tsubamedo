@@ -12,6 +12,7 @@ export function Sidebar({
   selected,
   onSelect,
   onOpen,
+  onImport,
   onReload,
   ops,
   renameTarget,
@@ -22,6 +23,7 @@ export function Sidebar({
   selected: string | null;
   onSelect: (id: string | null) => void;
   onOpen: () => void;
+  onImport: () => void;
   onReload: () => void;
   ops: TreeOps;
   /** Something just created, to rename in place. */
@@ -61,6 +63,9 @@ export function Sidebar({
             </button>
           </>
         )}
+        <button className="icon" title="Импорт из Insomnia, Postman, OpenAPI или HAR (⇧⌘I)" onClick={onImport}>
+          ⇣
+        </button>
         <button className="icon" title="Открыть коллекцию (⌘O)" onClick={onOpen}>
           ⌂
         </button>
@@ -90,7 +95,12 @@ export function Sidebar({
             ) : (
               <div className="side-empty small muted">
                 <p>Коллекция — это папка с файлом tsubamedo.toml: запросы лежат в ней обычными файлами и живут в git.</p>
-                <button onClick={onOpen}>Открыть папку…</button>
+                <div className="side-empty-actions">
+                  <button onClick={onOpen}>Открыть папку…</button>
+                  <button onClick={onImport} title="Экспорт Insomnia, коллекция Postman, OpenAPI, HAR">
+                    Импорт…
+                  </button>
+                </div>
                 <p className="faint">
                   Новая коллекция: <code>tsubamedo init</code>
                 </p>

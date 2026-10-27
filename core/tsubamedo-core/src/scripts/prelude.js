@@ -24,16 +24,30 @@
 
   // ---- variables ----
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  // Names the script removed: for it they are gone, other requests still have theirs.
+  const removed = new Set();
   const vars = {
     get(name) {
       name = String(name);
+      if (removed.has(name)) return undefined;
       return own(out.vars, name) ? out.vars[name] : own(input.vars, name) ? input.vars[name] : undefined;
     },
     set(name, value) {
+      removed.delete(String(name));
       out.vars[String(name)] = value == null ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
     },
     has(name) {
       return vars.get(name) !== undefined;
+    },
+    unset(name) {
+      delete out.vars[String(name)];
+      removed.add(String(name));
+    },
+    /** Every variable, as an object. */
+    all() {
+      const all = { ...input.vars, ...out.vars };
+      for (const name of removed) delete all[name];
+      return all;
     },
     /** `{{name}}` in a text replaced, with variables inside variables. */
     render(text) {

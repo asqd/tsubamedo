@@ -34,6 +34,15 @@ enum Command {
     Run(RunArgs),
     /// Проверить, что файлы читаются и все переменные заданы.
     Check(CheckArgs),
+    /// Перенести коллекцию Insomnia или Postman, описание OpenAPI или Swagger, запись HAR.
+    Import {
+        /// Экспорт Insomnia (JSON или YAML), коллекция или окружение Postman, OpenAPI, HAR.
+        file: PathBuf,
+        /// Куда: новая папка (по умолчанию — по имени коллекции в текущей) или существующая
+        /// коллекция — тогда запросы лягут в папку внутри неё.
+        #[arg(short, long, value_name = "ПАПКА")]
+        to: Option<PathBuf>,
+    },
     /// Создать коллекцию в папке.
     Init {
         #[arg(default_value = ".")]
@@ -134,6 +143,7 @@ async fn main() -> ExitCode {
         Command::Send(args) => send_one(args).await,
         Command::Run(args) => run(args).await,
         Command::Check(args) => check(args),
+        Command::Import { file, to } => import(&file, to),
         Command::Init { dir } => init(&dir),
     };
     match result {
@@ -465,6 +475,35 @@ fn check(args: CheckArgs) -> tsubamedo_core::Result<ExitCode> {
         println!("\n{}", paint.red(&format!("Проблем: {problems}")));
         Ok(ExitCode::FAILURE)
     }
+}
+
+fn import(file: &Path, to: Option<PathBuf>) -> tsubamedo_core::Result<ExitCode> {
+    let imported = tsubamedo_core::import::read(file)?;
+    let paint = Paint::stdout();
+    let dir = to.unwrap_or_else(|| tsubamedo_core::import::new_dir(&imported, Path::new(".")));
+    let written = tsubamedo_core::import::write(&imported, &dir)?;
+    println!("{} {} «{}»", paint.bold("Импорт:"), imported.format.title(), imported.name);
+    let place = if written.folder.is_empty() {
+        format!("Создана коллекция {}", dir.display())
+    } else {
+        format!("В коллекцию {} в папку «{}»", written.root.display(), written.folder)
+    };
+    let mut what = vec![format!("запросов: {}", written.requests)];
+    if !written.environments.is_empty() {
+        what.push(format!("окружения: {}", written.environments.join(", ")));
+    }
+    println!("{place} — {}", what.join(", "));
+    for w in &imported.warnings {
+        println!("{}", paint.yellow(&format!("! {w}")));
+    }
+    if !written.kept.is_empty() {
+        println!("{}", paint.dim(&format!("Уже были, оставлены прежние значения: {}", written.kept.join(", "))));
+    }
+    if written.requests > 0 {
+        let env = written.environments.first().map(|e| format!(" -e {e}")).unwrap_or_default();
+        println!("{}", paint.dim(&format!("Попробуйте: tsubamedo run {}{env}", written.root.display())));
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn init(dir: &Path) -> tsubamedo_core::Result<ExitCode> {

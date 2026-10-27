@@ -149,3 +149,66 @@ fn no_files_no_network_no_modules() {
     assert_eq!(out.error, None);
     assert!(out.logs[0].contains("Error"), "{:?}", out.logs);
 }
+
+#[test]
+fn postman_and_insomnia_scripts_run_as_they_are() {
+    let request = Request { method: "POST".into(), url: "http://api.test/login".into(), body: Body::Json { content: "{}".into() }, ..Request::default() };
+    let before = r#"
+        const ts = String(1700000000);
+        pm.environment.set("ts", ts);
+        pm.request.headers.add({ key: "X-Sign", value: CryptoJS.HmacSHA256("{}", "key").toString(CryptoJS.enc.Base64) });
+        pm.request.url.query.add({ key: "v", value: "2" });
+        console.log(pm.variables.replaceIn("{{base}}/x"), pm.info.eventName);
+    "#;
+    let (changed, out) = super::before(before, &request, &vars(&[("base", "http://api.test")]));
+    assert_eq!(out.error, None);
+    assert_eq!(out.vars, [("ts".to_string(), "1700000000".to_string())]);
+    assert_eq!(out.logs, ["http://api.test/x prerequest"]);
+    // HMAC-SHA256("key", "{}") in base64, checked with openssl.
+    let sign = changed.headers.iter().find(|p| p.name == "X-Sign").unwrap();
+    assert_eq!(sign.value, "p3dyTZQ+tI3Gm8qKSm1XoE2z+ex+HeTlgehgJlvfMDI=");
+    assert_eq!(changed.query, [Pair::new("v", "2")]);
+
+    let sent = prepare(&changed, &Vars::new(), Path::new(".")).unwrap();
+    let r = response(201, r#"{"token": "t-1", "user": {"roles": ["admin"]}, "items": []}"#);
+    let after = r#"
+        pm.test("создан", () => pm.response.to.have.status(201));
+        pm.test("не ошибка", () => pm.response.to.not.be.error);
+        pm.test("ok — это 200", () => pm.response.to.be.ok);
+        const body = pm.response.json();
+        pm.test("токен", () => {
+            pm.expect(body.token).to.be.a("string").and.not.empty;
+            pm.expect(body).to.have.property("user").that.has.property("roles");
+            pm.expect(body.user.roles).to.include("admin");
+            pm.expect(body.items).to.be.an("array").that.is.empty;
+            pm.expect(pm.response.responseTime).to.be.below(1000);
+        });
+        pm.test("deep", () => pm.expect(body.user).to.eql({ roles: ["admin"] }));
+        pm.test("заголовок", () => pm.response.to.have.header("X-Request-Id", "r-1"));
+        insomnia.test("insomnia", () => insomnia.expect(insomnia.response.code).to.equal(201));
+        tests["старый стиль"] = responseCode.code === 201;
+        tests["ложь"] = false;
+        pm.collectionVariables.set("token", body.token);
+        postman.setEnvironmentVariable("user", "u-1");
+    "#;
+    let out = super::after(after, &sent, &r, &Vars::new());
+    assert_eq!(out.error, None);
+    let results: Vec<(&str, bool)> = out.tests.iter().map(|t| (t.name.as_str(), t.ok)).collect();
+    assert_eq!(
+        results,
+        [
+            ("создан", true),
+            ("не ошибка", true),
+            ("ok — это 200", false),
+            ("токен", true),
+            ("deep", true),
+            ("заголовок", true),
+            ("insomnia", true),
+            ("старый стиль", true),
+            ("ложь", false)
+        ]
+    );
+    assert_eq!(out.vars, [("token".to_string(), "t-1".to_string()), ("user".into(), "u-1".into())]);
+    assert_eq!(sets(after), ["token", "user"]);
+    assert_eq!(reads("pm.environment.get('a'); insomnia.environment.get(\"b\"); postman.getGlobalVariable('c')"), ["a", "b", "c"]);
+}

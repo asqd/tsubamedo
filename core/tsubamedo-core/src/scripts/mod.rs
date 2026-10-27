@@ -19,6 +19,9 @@
 //! The sandbox has no files, network or timers: only the language, `vars`, `request`,
 //! `response`, `test`/`expect`, `console`, `crypto` and `btoa`/`atob`. A script gets
 //! [`TIME_LIMIT`] and [`MEMORY_LIMIT`].
+//!
+//! Scripts imported from Postman and Insomnia find their `pm`, `insomnia`, `postman`,
+//! `tests[…]` and `CryptoJS` there too, as far as such scripts usually go (`compat.js`).
 
 use std::io::Read;
 use std::time::{Duration, Instant};
@@ -40,6 +43,8 @@ pub const MEMORY_LIMIT: usize = 256 << 20;
 const BODY_LIMIT: u64 = 16 << 20;
 
 const PRELUDE: &str = include_str!("prelude.js");
+/// `pm`, `postman`, `insomnia` over the prelude, for scripts imported from those tools.
+const COMPAT: &str = include_str!("compat.js");
 /// The name errors give the user's script, to tell its lines from the prelude's.
 const FILENAME: &str = "script";
 
@@ -138,14 +143,22 @@ pub fn after(script: &str, sent: &Prepared, response: &Response, vars: &Vars) ->
     run(script, json!({ "vars": vars, "request": request, "response": response })).1
 }
 
+/// Where a script keeps variables: ours, and the scopes of Postman and Insomnia, which are
+/// all the same set here.
+const SCOPE: &str = r"(?:vars|(?:pm|insomnia)\.(?:environment|collectionVariables|globals|variables|baseEnvironment))";
+
 /// Names a script reads with `vars.get("…")` or `vars.has("…")`, for ordering requests.
 pub fn reads(script: &str) -> Vec<String> {
-    names(script, r#"vars\.(?:get|has)\(\s*["'`]([^"'`]+)["'`]\s*\)"#)
+    let mut names = names(script, &format!(r#"{SCOPE}\.(?:get|has)\(\s*["'`]([^"'`]+)["'`]\s*\)"#));
+    names.extend(self::names(script, r#"postman\.get(?:Environment|Global)Variable\(\s*["'`]([^"'`]+)["'`]\s*\)"#));
+    names
 }
 
 /// Names a script sets with `vars.set("…", …)`: the request gives those to others.
 pub fn sets(script: &str) -> Vec<String> {
-    names(script, r#"vars\.set\(\s*["'`]([^"'`]+)["'`]\s*,"#)
+    let mut names = names(script, &format!(r#"{SCOPE}\.set\(\s*["'`]([^"'`]+)["'`]\s*,"#));
+    names.extend(self::names(script, r#"postman\.set(?:Environment|Global)Variable\(\s*["'`]([^"'`]+)["'`]\s*,"#));
+    names
 }
 
 fn names(script: &str, pattern: &str) -> Vec<String> {
@@ -227,9 +240,12 @@ fn install(ctx: &Ctx<'_>, input: &str) -> rquickjs::Result<()> {
         String::from_utf8(bytes).map_err(|_| Exception::throw_message(&ctx, "atob: внутри не текст UTF-8"))
     })?)?;
     g.set("__uuid", Function::new(ctx.clone(), || uuid::Uuid::new_v4().to_string())?)?;
-    let mut options = EvalOptions::default();
-    options.filename = Some("prelude".into());
-    ctx.eval_with_options::<(), _>(PRELUDE, options)
+    for (code, name) in [(PRELUDE, "prelude"), (COMPAT, "compat")] {
+        let mut options = EvalOptions::default();
+        options.filename = Some(name.into());
+        ctx.eval_with_options::<(), _>(code, options)?;
+    }
+    Ok(())
 }
 
 fn encode(ctx: &Ctx<'_>, bytes: &[u8], encoding: &str) -> rquickjs::Result<String> {

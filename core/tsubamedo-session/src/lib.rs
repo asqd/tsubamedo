@@ -177,6 +177,8 @@ impl Session {
                 Ok(Value::Null)
             }
             "vars" => self.vars(args::<EnvArg>(a)?.env),
+            "importPreview" => self.import_preview(args::<PathArg>(a)?.path),
+            "importCollection" => self.import_collection(args(a)?),
             "importCurl" => reply(tsubamedo_core::curl::parse(&args::<TextArg>(a)?.text).map_err(|e| e.to_string())?),
             "curl" => self.curl(args(a)?),
             "view" => self.view(args(a)?).await,
@@ -239,6 +241,34 @@ impl Session {
         state.collection = Some(collection);
         state.captured = captured.unwrap_or_default();
         reply(info)
+    }
+
+    /// What a file would bring, before anything is written.
+    fn import_preview(&self, path: String) -> Reply {
+        let imported = tsubamedo_core::import::read(Path::new(&path)).map_err(|e| e.to_string())?;
+        let mut folders: Vec<&str> = imported.requests.iter().filter_map(|p| p.folder.first().map(String::as_str)).collect();
+        folders.dedup();
+        Ok(json!({
+            "format": imported.format.title(),
+            "name": imported.name,
+            "requests": imported.requests.len(),
+            "folders": folders.len(),
+            "environments": imported.environments.iter().map(|e| &e.name).collect::<Vec<_>>(),
+            "vars": imported.vars.len(),
+            "warnings": imported.warnings,
+        }))
+    }
+
+    /// Into the open collection (a folder in it), or a new collection in `parent`, then opened.
+    fn import_collection(&self, a: ImportArg) -> Reply {
+        let imported = tsubamedo_core::import::read(Path::new(&a.path)).map_err(|e| e.to_string())?;
+        let dir = match a.parent {
+            Some(parent) => tsubamedo_core::import::new_dir(&imported, Path::new(&parent)),
+            None => self.state.lock().unwrap().collection()?.root.clone(),
+        };
+        let written = tsubamedo_core::import::write(&imported, &dir).map_err(|e| e.to_string())?;
+        let info = self.open_collection(written.root.to_string_lossy().into_owned())?;
+        Ok(json!({ "written": written, "collection": info }))
     }
 
     fn get_request(&self, id: String) -> Reply {
@@ -700,7 +730,7 @@ fn collection_info(c: &Collection) -> CollectionInfo {
             .iter()
             .map(|e| RequestItem {
                 id: e.id.clone(),
-                name: e.display_name().rsplit('/').next().unwrap_or_default().to_string(),
+                name: e.request.name.clone().unwrap_or_else(|| e.id.rsplit('/').next().unwrap_or_default().to_string()),
                 method: e.request.method.to_ascii_uppercase(),
                 folder: e.id.rsplit_once('/').map(|(f, _)| f.to_string()).unwrap_or_default(),
             })
@@ -764,6 +794,13 @@ struct HistoryArg {
 #[derive(Deserialize)]
 struct EnvArg {
     env: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ImportArg {
+    path: String,
+    /// A new collection in this folder; none means into the open one.
+    parent: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -1,0 +1,10 @@
+{
+  "id": "5b6c",
+  "name": "Stage",
+  "values": [
+    { "key": "base_url", "value": "https://stage.api.test", "type": "default", "enabled": true },
+    { "key": "client", "value": "c-1", "type": "secret", "enabled": true },
+    { "key": "off", "value": "x", "type": "default", "enabled": false }
+  ],
+  "_postman_variable_scope": "environment"
+}

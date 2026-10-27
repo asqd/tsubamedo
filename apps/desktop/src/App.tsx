@@ -1,7 +1,8 @@
 // The window: collection on the left, tabs of open requests, each with its request and answer.
 // Edits are saved to the request's file as you type; the core rewrites only what changed.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, CollectionInfo, emptyRequest, Reorganized, Request } from "./api";
+import { api, CollectionInfo, emptyRequest, ImportPreview, Reorganized, Request } from "./api";
+import { ImportDialog, ImportTarget } from "./components/ImportDialog";
 import { Logo } from "./components/Logo";
 import { RequestEditor } from "./components/RequestEditor";
 import { RunPanel, RunState } from "./components/RunPanel";
@@ -10,7 +11,7 @@ import { Kind, TreeOps } from "./components/RequestTree";
 import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { Tab } from "./tabs";
-import { mod, pickFolder } from "./platform";
+import { mod, pickFolder, pickImportFile, pickParentFolder } from "./platform";
 import { VarInfo, VarsContext } from "./vars";
 
 interface Notice {
@@ -61,6 +62,7 @@ export default function App() {
   const [historyVersion, setHistoryVersion] = useState(0);
   const [renameTarget, setRenameTarget] = useState<{ kind: Kind; path: string; n: number } | null>(null);
   const [run, setRun] = useState<RunState | null>(null);
+  const [importing, setImporting] = useState<{ path: string; preview: ImportPreview; busy: boolean } | null>(null);
 
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
@@ -328,6 +330,46 @@ export default function App() {
     if (path) openCollection(path);
   };
 
+  const startImport = async () => {
+    const path = await pickImportFile();
+    if (!path) return;
+    try {
+      setImporting({ path, preview: await api.importPreview(path), busy: false });
+    } catch (e) {
+      setProblem((e as Error).message);
+    }
+  };
+
+  const finishImport = async (target: ImportTarget) => {
+    if (!importing) return;
+    const parent = target.kind === "new" ? await pickParentFolder() : null;
+    if (target.kind === "new" && !parent) return;
+    await flushSave();
+    setImporting({ ...importing, busy: true });
+    try {
+      const { written, collection: info } = await api.importCollection(importing.path, parent);
+      setImporting(null);
+      if (target.kind === "new") {
+        await openCollection(written.root);
+      } else {
+        setCollection(info);
+        if (!env && info.environments.length > 0) setEnv(info.environments[0]);
+      }
+      const n = written.requests;
+      const what =
+        target.kind === "new"
+          ? `Создана коллекция «${info.name}»: запросов ${n}`
+          : n > 0
+            ? `Импортировано в папку «${written.folder}»: запросов ${n}`
+            : `Добавлены окружения: ${written.environments.join(", ") || "—"}`;
+      const kept = written.kept.length ? ` · уже были, оставлены: ${written.kept.join(", ")}` : "";
+      flash({ text: what + kept });
+    } catch (e) {
+      setImporting((cur) => cur && { ...cur, busy: false });
+      setProblem((e as Error).message);
+    }
+  };
+
   /** After a file operation: the new collection, open tabs following their files. */
   const applyReorganized = async (result: Reorganized, remap: (id: string) => string | null) => {
     setCollection(result.collection);
@@ -465,6 +507,9 @@ export default function App() {
       if (e.key === "Enter") {
         e.preventDefault();
         send();
+      } else if ((k === "i" || k === "ш") && e.shiftKey) {
+        e.preventDefault();
+        startImport();
       } else if (k === "o" || k === "щ") {
         e.preventDefault();
         open();
@@ -562,6 +607,7 @@ export default function App() {
             selected={tab.id}
             onSelect={openRequest}
             onOpen={open}
+            onImport={startImport}
             onReload={reload}
             ops={ops}
             renameTarget={renameTarget}
@@ -626,6 +672,16 @@ export default function App() {
               </button>
             )}
           </div>
+        )}
+        {importing && (
+          <ImportDialog
+            path={importing.path}
+            preview={importing.preview}
+            collection={collection}
+            busy={importing.busy}
+            onImport={finishImport}
+            onCancel={() => setImporting(null)}
+          />
         )}
       </div>
     </VarsContext.Provider>

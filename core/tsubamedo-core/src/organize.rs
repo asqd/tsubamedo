@@ -62,7 +62,7 @@ fn folder_id(root: &Path, path: &Path) -> String {
 
 /// `dir/base.toml`, or `dir/base 2.toml` and so on when taken. `keep` is the path being renamed:
 /// it may be reused, so changing only the case works on case-insensitive disks.
-fn free_path(dir: &Path, base: &str, ext: &str, keep: Option<&Path>) -> PathBuf {
+pub(crate) fn free_path(dir: &Path, base: &str, ext: &str, keep: Option<&Path>) -> PathBuf {
     // Names the collection itself uses at its top: the manifest and the environments folder.
     let top = dir.join(MANIFEST).is_file();
     let reserved = |name: &str| top && (name.to_lowercase() == MANIFEST || (ext.is_empty() && name == "env"));

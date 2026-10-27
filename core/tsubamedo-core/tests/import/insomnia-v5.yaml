@@ -1,0 +1,72 @@
+type: collection.insomnia.rest/5.0
+name: Котики
+meta:
+  id: wrk_5
+  created: 1740000000000
+  modified: 1740000000000
+collection:
+  - name: Котики
+    meta:
+      id: fld_cats
+      sortKey: -1
+    authentication:
+      type: basic
+      username: "{{ _.user }}"
+      password: "{{ _.password }}"
+    scripts:
+      preRequest: console.log("папка")
+    children:
+      - url: "{{ _.base_url }}/cats"
+        name: Все котики
+        meta:
+          id: req_cats
+          sortKey: -2
+        method: GET
+        parameters:
+          - name: limit
+            value: "10"
+        scripts:
+          afterResponse: |-
+            insomnia.test("есть котики", () => {
+              insomnia.expect(insomnia.response.json()).to.have.lengthOf(2);
+            });
+        settings:
+          followRedirects: "off"
+      - url: "{{ _.base_url }}/cats"
+        name: Новый котик
+        meta:
+          id: req_new
+          sortKey: -1
+        method: POST
+        body:
+          mimeType: application/x-www-form-urlencoded
+          params:
+            - name: name
+              value: Барсик
+            - name: age
+              value: "2"
+              disabled: true
+  - url: "{{ _.base_url }}/graphql"
+    name: GraphQL
+    meta:
+      id: req_gql
+      sortKey: 5
+    method: POST
+    body:
+      mimeType: application/graphql
+      text: '{"query":"{ cats { name } }"}'
+environments:
+  name: Base Environment
+  meta:
+    id: env_5
+  data:
+    base_url: https://cats.test
+    user: admin
+  subEnvironments:
+    - name: local
+      meta:
+        id: env_local
+      data:
+        base_url: http://localhost:3000
+        password: local-pass
+      isPrivate: true

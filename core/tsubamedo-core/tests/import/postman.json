@@ -1,0 +1,239 @@
+{
+  "info": {
+    "_postman_id": "1f0e",
+    "name": "Postman API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.variables.set(\"ts\", Date.now());"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://api.test"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "old",
+      "value": "x",
+      "disabled": true
+    }
+  ],
+  "item": [
+    {
+      "name": "Вход",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"login\": \"kot\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/login",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "login"
+          ]
+        },
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"200\", () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set(\"token\", pm.response.json().token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users / пользователи",
+      "item": [
+        {
+          "name": "Получить пользователя",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Old",
+                "value": "1",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/:id?expand=orders&debug=1&rid={{$guid}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                ":id"
+              ],
+              "query": [
+                {
+                  "key": "expand",
+                  "value": "orders"
+                },
+                {
+                  "key": "debug",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "rid",
+                  "value": "{{$guid}}"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "42"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Аватар",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-Api-Key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{api_key}}"
+                },
+                {
+                  "key": "in",
+                  "value": "query"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "value": "{{$randomFirstName}}",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "/tmp/a.png"
+                }
+              ]
+            },
+            "url": "{{base_url}}/users/me/avatar"
+          }
+        },
+        {
+          "name": "Форма",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "a",
+                  "value": "1"
+                },
+                {
+                  "key": "b",
+                  "value": "2",
+                  "disabled": true
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/form"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "GraphQL",
+      "request": {
+        "method": "POST",
+        "auth": {
+          "type": "digest",
+          "digest": []
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query { me { id } }",
+            "variables": "{\"a\": 1}"
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/graphql"
+        }
+      }
+    },
+    {
+      "name": "XML",
+      "request": {
+        "method": "POST",
+        "body": {
+          "mode": "raw",
+          "raw": "<a/>",
+          "options": {
+            "raw": {
+              "language": "xml"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/xml"
+        }
+      }
+    }
+  ]
+}

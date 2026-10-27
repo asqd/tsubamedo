@@ -11,12 +11,14 @@
 //! - [`checks`] — response checks (`status == 200`, `$.items count > 0`) and captured values.
 //! - [`run`] — requests that take values from each other's responses, in the right order.
 //! - [`scripts`] — JavaScript before and after a request, on QuickJS.
+//! - [`import`] — collections of Insomnia and Postman, OpenAPI and HAR.
 
 pub mod checks;
 pub mod collection;
 pub mod curl;
 pub mod error;
 pub mod http;
+pub mod import;
 pub mod model;
 pub mod organize;
 pub mod prepare;

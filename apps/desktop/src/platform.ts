@@ -20,6 +20,23 @@ export async function pickFolder(): Promise<string | null> {
   return typeof picked === "string" ? picked : null;
 }
 
+/** A file to import: exports of Insomnia and Postman, OpenAPI, HAR. */
+export async function pickImportFile(): Promise<string | null> {
+  if (inBridge) return prompt("Файл для импорта (в мосте путь вводится вручную)");
+  const picked = await open({
+    title: "Импорт: Insomnia, Postman, OpenAPI или HAR",
+    filters: [{ name: "Коллекции и описания API", extensions: ["json", "yaml", "yml", "har"] }],
+  });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** A folder to create a new collection in. */
+export async function pickParentFolder(): Promise<string | null> {
+  if (inBridge) return prompt("Папка, в которой создать коллекцию (в мосте путь вводится вручную)");
+  const picked = await open({ directory: true, title: "Где создать коллекцию" });
+  return typeof picked === "string" ? picked : null;
+}
+
 export async function pickSavePath(name: string): Promise<string | null> {
   if (inBridge) return prompt("Куда сохранить", `/tmp/${name}`);
   return save({ defaultPath: name, title: "Сохранить ответ" });

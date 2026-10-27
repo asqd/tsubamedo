@@ -67,7 +67,7 @@ pub fn har(doc: &Value) -> Result<Imported> {
     let several = hosts.len() > 1;
     let name = if hosts.len() == 1 { hosts.iter().next().map(|h| h.to_string()).unwrap_or_default() } else { String::new() };
     let requests = kept.into_iter().map(|(host, request)| Placed { folder: if several { vec![host] } else { Vec::new() }, request }).collect();
-    Ok(Imported { format: Format::Har, name, requests, vars: Vec::new(), environments: Vec::new(), warnings })
+    Ok(Imported { format: Format::Har, name, requests, vars: Vec::new(), environments: Vec::new(), warnings, files: Vec::new() })
 }
 
 fn is_api(e: &Value, url: &url::Url, method: &str, typed: bool) -> bool {

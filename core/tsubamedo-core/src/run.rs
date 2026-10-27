@@ -343,7 +343,7 @@ impl Runner {
             let options = self.options.for_request(&prepared);
             let result = http::send(&prepared, &options).await;
             let (checks, mut captures) = match &result {
-                Ok(response) => self.read(&scripted, &prepared, response, &mut logs),
+                Ok(response) => self.read(&scripted, &prepared, response, &dir, &mut logs),
                 Err(_) => (Vec::new(), Vec::new()),
             };
             set_by_script.retain(|c| !captures.iter().any(|x| x.name == c.name));
@@ -377,7 +377,7 @@ impl Runner {
 
     /// Captures first, then the script after, then the checks, so each can use what the one
     /// before it set.
-    fn read(&mut self, request: &Request, sent: &Prepared, response: &Response, logs: &mut Vec<String>) -> (Vec<CheckResult>, Vec<Captured>) {
+    fn read(&mut self, request: &Request, sent: &Prepared, response: &Response, dir: &Path, logs: &mut Vec<String>) -> (Vec<CheckResult>, Vec<Captured>) {
         let answer = Answer::new(response);
         let mut captures = checks::capture(&request.captures, &answer);
         for c in &captures {
@@ -399,7 +399,7 @@ impl Runner {
                 results.push(CheckResult { check: "скрипт после ответа".into(), ok: false, actual: None, error: Some(e) });
             }
         }
-        results.extend(checks::run_checks(&request.checks, &answer, &self.vars()));
+        results.extend(checks::run_checks(&request.checks, &answer, &self.vars(), Some(dir)));
         (results, captures)
     }
 }

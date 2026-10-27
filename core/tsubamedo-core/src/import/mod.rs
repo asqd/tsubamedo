@@ -63,6 +63,8 @@ pub struct Imported {
     pub vars: Vec<Var>,
     pub environments: Vec<Environment>,
     pub warnings: Vec<String>,
+    /// Other files, by path from where the requests go: JSON schemas of OpenAPI responses.
+    pub files: Vec<(String, String)>,
 }
 
 /// A request and the folders it sits in, outermost first.
@@ -209,6 +211,14 @@ pub fn write(imported: &Imported, dir: &Path) -> Result<Written> {
         environments.push(name);
     }
 
+    for (rel, text) in &imported.files {
+        let path = base.join(rel);
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir).map_err(|e| Error::io(dir, e))?;
+        }
+        fs::write(&path, text).map_err(|e| Error::io(&path, e))?;
+    }
+
     // Numbered names keep the order the requests had there, where it was not alphabetical.
     let mut by_folder: BTreeMap<&[String], Vec<&Request>> = BTreeMap::new();
     for item in &imported.requests {
@@ -243,7 +253,7 @@ pub fn new_dir(imported: &Imported, parent: &Path) -> PathBuf {
 
 /// A file name from a request or folder name: separators become spaces, not dashes, so
 /// `/users/{id}` reads as `users {id}`.
-fn file_name(name: &str) -> String {
+pub(crate) fn file_name(name: &str) -> String {
     let spaced: String = name.chars().map(|c| if c == '/' || c == '\\' { ' ' } else { c }).collect();
     let spaced = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
     let short: String = spaced.chars().take(80).collect();

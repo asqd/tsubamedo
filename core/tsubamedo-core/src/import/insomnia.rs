@@ -435,7 +435,7 @@ impl Converter {
                 placed
             })
             .collect();
-        Imported { format: Format::Insomnia, name, requests, vars, environments, warnings: self.warnings }
+        Imported { format: Format::Insomnia, name, requests, vars, environments, warnings: self.warnings, files: Vec::new() }
     }
 }
 

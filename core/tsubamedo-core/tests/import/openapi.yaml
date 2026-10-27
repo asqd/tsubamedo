@@ -33,6 +33,12 @@ paths:
       responses:
         "200":
           description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pet"
     post:
       tags: [pets]
       operationId: createPet
@@ -51,7 +57,12 @@ paths:
       tags: [pets]
       summary: Один питомец
       responses:
-        "200": { description: ok }
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
     delete:
       tags: [pets]
       security: []
@@ -104,7 +115,8 @@ components:
       properties:
         id: { type: integer, readOnly: true }
         name: { type: string, example: Барсик }
-        born: { type: string, format: date }
+        born: { type: string, format: date, nullable: true }
+        weight: { type: number, minimum: 0, exclusiveMinimum: true }
         tags:
           type: array
           items: { type: string }

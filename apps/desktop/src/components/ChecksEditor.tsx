@@ -71,6 +71,9 @@ export function ChecksEditor({
         Что проверить: <code>status</code>, <code>time</code> (мс), <code>size</code>, <code>header Имя</code>, <code>body</code> или JSONPath <code>$.путь</code>;
         после него <code>count</code> — длина. Условия: <code>==</code> <code>!=</code> <code>&lt;</code> <code>&gt;</code> <code>contains</code> <code>matches</code>{" "}
         <code>exists</code> <code>empty</code>, перед словами можно <code>not</code>. Значение — JSON или просто текст, <code>{"{{переменные}}"}</code> работают.
+        <br />
+        JSON Schema: <code>$ schema schemas/order.json</code> — файл ищется от папки запроса вверх до корня коллекции;{" "}
+        <code>{'$.items[*] schema {"required": ["id"]}'}</code> — схема прямо в строке, каждое совпадение пути проверяется отдельно.
       </div>
 
       <div className="section-head">Значения из ответа</div>

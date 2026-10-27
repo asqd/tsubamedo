@@ -9,6 +9,7 @@
 //! - [`http`] — sending with a time for every phase; big bodies go to a temporary file.
 //! - [`view`] — lines of a body (raw or pretty JSON) for a viewer that never loads it whole.
 //! - [`checks`] — response checks (`status == 200`, `$.items count > 0`) and captured values.
+//! - [`schema`] — JSON Schema for the `schema` check.
 //! - [`run`] — requests that take values from each other's responses, in the right order.
 //! - [`scripts`] — JavaScript before and after a request, on QuickJS.
 //! - [`import`] — collections of Insomnia and Postman, OpenAPI and HAR.
@@ -24,6 +25,7 @@ pub mod organize;
 pub mod prepare;
 pub mod request_file;
 pub mod run;
+pub mod schema;
 pub mod scripts;
 pub mod template;
 pub mod view;

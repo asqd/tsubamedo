@@ -23,13 +23,17 @@
 //! $.token exists
 //! $.error not exists
 //! $.email matches ^[^@]+@[^@]+$
+//! $ schema schemas/order.json
+//! $.items[*] schema {"type": "object", "required": ["id"]}
 //! ```
 //!
-//! Conditions: `==`, `!=`, `<`, `<=`, `>`, `>=`, `contains`, `matches`, `exists`, `empty`; `not`
+//! Conditions: `==`, `!=`, `<`, `<=`, `>`, `>=`, `contains`, `matches`, `exists`, `empty`,
+//! `schema` (JSON Schema, see [`crate::schema`]; each match of the path is checked); `not`
 //! before the word ones. The value is JSON (`200`, `"text"`, `true`, `null`, `[1, 2]`) or, when it
 //! is not, plain text. `{{variables}}` work anywhere in the line.
 
 use std::io::Read;
+use std::path::Path;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -73,6 +77,7 @@ enum Op {
     Matches,
     Exists,
     Empty,
+    Schema,
 }
 
 #[derive(Debug, Clone)]
@@ -256,19 +261,20 @@ impl Rule {
                 "matches" => Op::Matches,
                 "exists" => Op::Exists,
                 "empty" => Op::Empty,
+                "schema" => Op::Schema,
                 _ => return None,
             };
             Some((op, after))
         })
         .ok_or_else(|| {
             if rest.is_empty() {
-                "нет условия: ==, !=, <, >, contains, matches, exists, empty".to_string()
+                "нет условия: ==, !=, <, >, contains, matches, exists, empty, schema".to_string()
             } else {
                 format!("непонятное условие «{rest}»")
             }
         })?;
-        if not && !matches!(op, Op::Contains | Op::Matches | Op::Exists | Op::Empty) {
-            return Err("not ставится перед contains, matches, exists или empty".into());
+        if not && !matches!(op, Op::Contains | Op::Matches | Op::Exists | Op::Empty | Op::Schema) {
+            return Err("not ставится перед contains, matches, exists, empty или schema".into());
         }
         let value = value.trim();
         let needs_value = !matches!(op, Op::Exists | Op::Empty);
@@ -284,6 +290,15 @@ impl Rule {
                 let pattern = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(value);
                 regex::Regex::new(pattern).map_err(|e| format!("регулярное выражение: {e}"))?;
                 Value::String(pattern.to_string())
+            }
+            // A schema in the line is JSON; anything else is a file.
+            Op::Schema if value.starts_with('{') || value == "true" || value == "false" => {
+                serde_json::from_str(value).map_err(|e| format!("схема в строке — не JSON: {e}"))?
+            }
+            Op::Schema => {
+                let path = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(value);
+                let path = path.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')).unwrap_or(path);
+                Value::String(path.to_string())
             }
             _ => serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string())),
         };
@@ -328,7 +343,7 @@ impl Rule {
                 Value::Object(o) => o.is_empty(),
                 _ => false,
             },
-            Op::Exists => unreachable!(),
+            Op::Exists | Op::Schema => unreachable!(),
         };
         Ok(ok != self.not)
     }
@@ -410,8 +425,9 @@ impl<'a> Answer<'a> {
     }
 }
 
-/// Runs the enabled checks; a line that does not parse fails with the reason.
-pub fn run_checks(checks: &[Check], answer: &Answer, vars: &Vars) -> Vec<CheckResult> {
+/// Runs the enabled checks; a line that does not parse fails with the reason. `dir` is the
+/// request's folder, where schema files are looked for first.
+pub fn run_checks(checks: &[Check], answer: &Answer, vars: &Vars, dir: Option<&Path>) -> Vec<CheckResult> {
     checks
         .iter()
         .filter(|c| c.enabled && !c.text.trim().is_empty())
@@ -426,6 +442,19 @@ pub fn run_checks(checks: &[Check], answer: &Answer, vars: &Vars) -> Vec<CheckRe
                 Ok(rule) => rule,
                 Err(e) => return failed(e),
             };
+            if rule.op == Op::Schema {
+                let verdict = schema_values(&rule.query, answer).and_then(|values| {
+                    let values: Vec<(Vec<String>, &Value)> = values.iter().map(|(at, v)| (at.clone(), v.as_ref())).collect();
+                    crate::schema::validate(&rule.expected, dir, &values)
+                });
+                return match verdict {
+                    Err(e) => failed(e),
+                    Ok(Ok(())) if rule.not => failed("подходит под схему, а не должно".into()),
+                    Ok(Ok(())) => CheckResult { check: c.text.clone(), ok: true, actual: None, error: None },
+                    Ok(Err(_)) if rule.not => CheckResult { check: c.text.clone(), ok: true, actual: None, error: None },
+                    Ok(Err(why)) => failed(why),
+                };
+            }
             let actual = match rule.query.eval(answer) {
                 Ok(actual) => actual,
                 Err(e) => return failed(e),
@@ -437,6 +466,35 @@ pub fn run_checks(checks: &[Check], answer: &Answer, vars: &Vars) -> Vec<CheckRe
             }
         })
         .collect()
+}
+
+/// What a `schema` check validates, each with its place: every match of a path, the body as
+/// JSON, or the value of another query.
+type Located<'a> = (Vec<String>, std::borrow::Cow<'a, Value>);
+
+fn schema_values<'a>(query: &Query, answer: &'a Answer) -> Result<Vec<Located<'a>>, String> {
+    use std::borrow::Cow;
+    match &query.source {
+        Source::Path(path, text) if !query.count => {
+            let nodes = path.query_located(answer.json()?);
+            if nodes.is_empty() {
+                return Err(format!("в ответе нет {text}"));
+            }
+            Ok(nodes
+                .into_iter()
+                .map(|n| {
+                    let pointer = n.location().to_json_pointer();
+                    let at = pointer.split('/').skip(1).map(|t| t.replace("~1", "/").replace("~0", "~")).collect();
+                    (at, Cow::Borrowed(n.node()))
+                })
+                .collect())
+        }
+        Source::Body if !query.count => Ok(vec![(Vec::new(), Cow::Borrowed(answer.json()?))]),
+        _ => match query.eval(answer)? {
+            Some(v) => Ok(vec![(Vec::new(), Cow::Owned(v))]),
+            None => Err(format!("в ответе нет {}", query.describe())),
+        },
+    }
 }
 
 /// Reads the enabled captures: strings as they are, other JSON as JSON text.
@@ -461,7 +519,11 @@ pub fn capture(captures: &[Pair], answer: &Answer) -> Vec<Captured> {
 /// Whether a check line is understood, for the editor; `{{variables}}` are taken as written.
 pub fn validate(line: &str) -> Result<(), String> {
     let line = line.replace("{{", "").replace("}}", "");
-    Rule::parse(&line).map(|_| ())
+    let rule = Rule::parse(&line)?;
+    if rule.op == Op::Schema && !rule.expected.is_string() {
+        crate::schema::check_inline(&rule.expected)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -489,7 +551,7 @@ mod tests {
 
     fn results(r: &Response, lines: &[&str], vars: &Vars) -> Vec<(bool, Option<String>, Option<String>)> {
         let checks: Vec<Check> = lines.iter().map(|l| Check::new(*l)).collect();
-        run_checks(&checks, &Answer::new(r), vars).into_iter().map(|c| (c.ok, c.actual, c.error)).collect()
+        run_checks(&checks, &Answer::new(r), vars, None).into_iter().map(|c| (c.ok, c.actual, c.error)).collect()
     }
 
     const BODY: &str = r#"{"token":"t0k","user":{"id":7,"name":"Котик","email":"kot@test.ru"},"items":[{"price":10},{"price":25}],"empty":[],"note":null}"#;
@@ -579,5 +641,61 @@ mod tests {
         assert!(validate("$.items[?@.name == 'a b'] count > 0").is_ok());
         assert!(validate("status ==").is_err());
         assert!(validate("$.[").is_err());
+        assert!(validate("$ schema schemas/order.json").is_ok());
+        assert!(validate(r#"$.id schema {"type": "integer"}"#).is_ok());
+        assert_eq!(
+            validate(r#"$.id schema {"type": "integr"}"#).unwrap_err(),
+            r#"схема неверна: $.type: ожидалось одно из "array", "boolean", "integer", "null", "number", "object", "string""#
+        );
+        assert_eq!(validate(r#"$.id schema {"minimum": "x"}"#).unwrap_err(), "схема неверна: $.minimum: ожидалось число, а здесь строка");
+        assert!(validate(r#"$.id schema {"type": "#).unwrap_err().contains("не JSON"));
+    }
+
+    #[test]
+    fn checks_against_json_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join(crate::collection::MANIFEST), "name = \"x\"\n").unwrap();
+        std::fs::create_dir_all(root.join("schemas")).unwrap();
+        std::fs::create_dir_all(root.join("shop/orders")).unwrap();
+        std::fs::write(root.join("schemas/item.json"), r#"{"type": "object", "required": ["price"], "properties": {"price": {"type": "integer", "minimum": 15}}}"#).unwrap();
+        std::fs::write(
+            root.join("schemas/answer.json"),
+            r#"{"type": "object", "required": ["token", "user"], "properties": {
+                "user": {"type": "object", "required": ["id", "name"], "additionalProperties": false,
+                         "properties": {"id": {"type": "integer"}, "name": {"type": "string"}, "email": {"type": "string", "format": "email"}}},
+                "items": {"type": "array", "items": {"$ref": "item.json"}}}}"#,
+        )
+        .unwrap();
+        let r = response(200, BODY);
+        let run = |line: &str| {
+            let checks = [Check::new(line)];
+            let out = run_checks(&checks, &Answer::new(&r), &Vars::new(), Some(&root.join("shop/orders"))).remove(0);
+            (out.ok, out.error.unwrap_or_default())
+        };
+        // Found from the request's folder up at the root; `$ref` to the file next to it.
+        let (ok, why) = run("$ schema schemas/answer.json");
+        assert!(!ok);
+        assert_eq!(why, "$.items[0].price: 10 меньше 15");
+        assert_eq!(run("$.user schema schemas/answer.json#/properties/user"), (true, String::new()));
+        assert_eq!(run("body schema 'schemas/item.json'").1, "$: нет поля price");
+        // Each match of the path on its own, with its place.
+        assert_eq!(run("$.items[*] schema schemas/item.json").1, "$.items[0].price: 10 меньше 15");
+        assert_eq!(run(r#"$.items[*].price schema {"type": "integer"}"#), (true, String::new()));
+        assert_eq!(
+            run(r#"$.user schema {"type": "object", "required": ["age"], "additionalProperties": false, "properties": {"id": {"type": "string"}}}"#).1,
+            "$.user: нет поля age; $.user.id: ожидалось строка, а здесь число; $.user: лишние поля: name, email"
+        );
+        assert_eq!(run(r#"$.note schema {"type": ["string", "null"]}"#), (true, String::new()));
+        assert_eq!(run(r#"$.token not schema {"type": "integer"}"#), (true, String::new()));
+        assert_eq!(run(r#"$.token not schema {"type": "string"}"#).1, "подходит под схему, а не должно");
+        assert!(run("$ schema schemas/nope.json").1.starts_with("нет файла схемы schemas/nope.json"));
+        let (ok, why) = run(r#"$ schema {"$ref": "nope.json"}"#);
+        assert!(!ok && why.starts_with("схема: не прочитать /") && why.contains("shop/orders/nope.json"), "{why}");
+        assert_eq!(run(r#"$.missing schema {}"#).1, "в ответе нет $.missing");
+        assert!(run("$ schema {}").0);
+        let html = response(200, "<html>");
+        let checks = [Check::new("$ schema {}")];
+        assert!(run_checks(&checks, &Answer::new(&html), &Vars::new(), None)[0].error.as_deref().unwrap().starts_with("ответ не JSON"));
     }
 }

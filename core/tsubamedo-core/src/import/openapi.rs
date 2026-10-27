@@ -3,11 +3,15 @@
 //! The server address becomes `{{base_url}}`; with several servers each is an environment.
 //! Path parameters take their example or become `{{name}}`; optional query parameters are
 //! there but switched off. A body is the example from the description or one built from its
-//! schema. Each request checks the success status the description promises.
+//! schema. Each request checks the success status the description promises and, when the
+//! answer is JSON with a schema, `$ schema schemas/…json`: the schemas become JSON Schema files
+//! (2020-12, `nullable` and the like translated), one per component, referring to each other.
+
+use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
 
-use super::{Environment, Format, Imported, Placed, Var, array_at, str_at, text};
+use super::{Environment, Format, Imported, Placed, Var, array_at, file_name, str_at, text};
 use crate::model::{ApiKeyLocation, Auth, Body, Check, Pair, Part, Request};
 use crate::organize::clean_name;
 use crate::Result;
@@ -20,10 +24,16 @@ struct Spec<'a> {
     doc: &'a Value,
     v2: bool,
     warnings: Vec<String>,
+    /// Component name → its schema file in `schemas/`, for those the checks use.
+    components: BTreeMap<String, String>,
+    files: Vec<(String, String)>,
 }
 
+const SCHEMAS: &str = "schemas";
+const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+
 pub fn v3(doc: &Value) -> Result<Imported> {
-    let mut spec = Spec { doc, v2: false, warnings: Vec::new() };
+    let mut spec = Spec { doc, v2: false, warnings: Vec::new(), components: BTreeMap::new(), files: Vec::new() };
     let servers: Vec<(String, String)> = array_at(doc, "servers")
         .iter()
         .map(|s| {
@@ -40,7 +50,7 @@ pub fn v3(doc: &Value) -> Result<Imported> {
 }
 
 pub fn v2(doc: &Value) -> Result<Imported> {
-    let mut spec = Spec { doc, v2: true, warnings: Vec::new() };
+    let mut spec = Spec { doc, v2: true, warnings: Vec::new(), components: BTreeMap::new(), files: Vec::new() };
     let host = str_at(doc, "host");
     let base_path = str_at(doc, "basePath").trim_end_matches('/');
     let schemes: Vec<&str> = array_at(doc, "schemes").iter().filter_map(Value::as_str).collect();
@@ -94,7 +104,8 @@ impl Spec<'_> {
             }
         }
         let title = self.doc.pointer("/info/title").and_then(Value::as_str).unwrap_or_default().to_string();
-        Imported { format, name: title, requests, vars, environments, warnings: std::mem::take(&mut self.warnings) }
+        self.component_files();
+        Imported { format, name: title, requests, vars, environments, warnings: std::mem::take(&mut self.warnings), files: std::mem::take(&mut self.files) }
     }
 
     fn operation(&mut self, path: &str, method: &str, op: &Value, shared: &[Value]) -> Request {
@@ -154,12 +165,17 @@ impl Spec<'_> {
             .find(|s| !s.is_empty())
             .map(|s| s.lines().next().unwrap_or_default().to_string())
             .unwrap_or_else(|| path.to_string());
-        let checks = op
+        let success = op
             .get("responses")
             .and_then(Value::as_object)
-            .and_then(|r| r.keys().find(|k| k.starts_with('2') && k.len() == 3 && k.parse::<u16>().is_ok()).cloned())
-            .map(|code| vec![Check::new(format!("status == {code}"))])
-            .unwrap_or_default();
+            .and_then(|r| r.iter().find(|(k, _)| k.starts_with('2') && k.len() == 3 && k.parse::<u16>().is_ok()).map(|(k, v)| (k.clone(), v.clone())));
+        let mut checks = Vec::new();
+        if let Some((code, response)) = success {
+            checks.push(Check::new(format!("status == {code}")));
+            if let Some(file) = self.response_schema(&response, &format!("{} {path}", method.to_uppercase())) {
+                checks.push(Check::new(format!("$ schema {SCHEMAS}/{file}")));
+            }
+        }
         Request { name: Some(name), method: method.to_uppercase(), url, query, headers, auth, body, checks, ..Request::default() }
     }
 
@@ -326,6 +342,127 @@ impl Spec<'_> {
             }),
             _ => Value::Null,
         }
+    }
+
+    /// The schema file a JSON answer is checked with: the component's own when the answer is
+    /// one, otherwise a file of its own named after the operation.
+    fn response_schema(&mut self, response: &Value, operation: &str) -> Option<String> {
+        let response = self.resolve(response);
+        let schema = if self.v2 {
+            response.get("schema")?.clone()
+        } else {
+            let content = response.get("content")?.as_object()?;
+            let media = content.iter().find(|(m, _)| m.to_lowercase().contains("json")).map(|(_, v)| v)?;
+            media.get("schema")?.clone()
+        };
+        if let Some(name) = self.component_name(&schema) {
+            return Some(self.component_file(&name));
+        }
+        let mut converted = self.convert(&schema);
+        if let Value::Object(map) = &mut converted {
+            map.insert("$schema".into(), json!(DIALECT));
+        }
+        let file = format!("{}.json", file_name(&format!("{operation} ответ")));
+        self.files.push((format!("{SCHEMAS}/{file}"), serde_json::to_string_pretty(&converted).unwrap_or_default() + "\n"));
+        Some(file)
+    }
+
+    /// `X` of a `$ref` to `#/components/schemas/X` (`#/definitions/X` in Swagger 2).
+    fn component_name(&self, schema: &Value) -> Option<String> {
+        let r = schema.get("$ref")?.as_str()?;
+        let prefix = if self.v2 { "#/definitions/" } else { "#/components/schemas/" };
+        Some(r.strip_prefix(prefix)?.replace("~1", "/").replace("~0", "~"))
+    }
+
+    fn component_file(&mut self, name: &str) -> String {
+        if let Some(file) = self.components.get(name) {
+            return file.clone();
+        }
+        let mut file = format!("{}.json", file_name(name));
+        let mut n = 2;
+        while self.components.values().any(|f| f.eq_ignore_ascii_case(&file)) {
+            file = format!("{} {n}.json", file_name(name));
+            n += 1;
+        }
+        self.components.insert(name.to_string(), file.clone());
+        file
+    }
+
+    /// Files for the components the checks use, and those they use in turn.
+    fn component_files(&mut self) {
+        let mut written = std::collections::BTreeSet::new();
+        while let Some((name, file)) = self.components.iter().find(|(n, _)| !written.contains(*n)).map(|(n, f)| (n.clone(), f.clone())) {
+            written.insert(name.clone());
+            let base = if self.v2 { "/definitions" } else { "/components/schemas" };
+            let pointer = format!("{base}/{}", name.replace('~', "~0").replace('/', "~1"));
+            let Some(schema) = self.doc.pointer(&pointer).cloned() else { continue };
+            let mut converted = self.convert(&schema);
+            if let Value::Object(map) = &mut converted {
+                map.insert("$schema".into(), json!(DIALECT));
+                map.entry("title").or_insert(json!(name));
+            }
+            self.files.push((format!("{SCHEMAS}/{file}"), serde_json::to_string_pretty(&converted).unwrap_or_default() + "\n"));
+        }
+    }
+
+    /// An OpenAPI schema as JSON Schema 2020-12: components become files next to each other,
+    /// `nullable` becomes a `null` type, the old boolean `exclusiveMinimum` a number.
+    fn convert(&mut self, schema: &Value) -> Value {
+        let Value::Object(map) = schema else { return schema.clone() };
+        if map.contains_key("$ref") {
+            if let Some(name) = self.component_name(schema) {
+                return json!({ "$ref": self.component_file(&name) });
+            }
+            let resolved = self.resolve(schema);
+            return if resolved.get("$ref").is_some() { json!({}) } else { self.convert(&resolved) };
+        }
+        let mut out = Map::new();
+        for (key, value) in map {
+            let value = match key.as_str() {
+                // Values, not schemas.
+                "example" | "examples" | "default" | "enum" | "const" | "discriminator" | "xml" | "externalDocs" => value.clone(),
+                "properties" | "patternProperties" | "$defs" | "definitions" | "dependentSchemas" => match value {
+                    Value::Object(props) => Value::Object(props.iter().map(|(k, v)| (k.clone(), self.convert(v))).collect()),
+                    other => other.clone(),
+                },
+                "allOf" | "anyOf" | "oneOf" | "prefixItems" => match value {
+                    Value::Array(list) => Value::Array(list.iter().map(|v| self.convert(v)).collect()),
+                    other => other.clone(),
+                },
+                _ if value.is_object() => self.convert(value),
+                _ => value.clone(),
+            };
+            out.insert(key.clone(), value);
+        }
+        // Swagger 2 has a `file` type JSON Schema does not know.
+        if out.get("type").and_then(Value::as_str) == Some("file") {
+            out.remove("type");
+        }
+        let nullable = [out.remove("nullable"), out.remove("x-nullable")].into_iter().flatten().any(|v| v == json!(true));
+        if nullable {
+            match out.get_mut("type") {
+                Some(Value::String(t)) => {
+                    let t = t.clone();
+                    out.insert("type".into(), json!([t, "null"]));
+                }
+                Some(Value::Array(types)) if !types.contains(&json!("null")) => types.push(json!("null")),
+                _ => {}
+            }
+            if let Some(Value::Array(values)) = out.get_mut("enum")
+                && !values.contains(&Value::Null)
+            {
+                values.push(Value::Null);
+            }
+        }
+        for (exclusive, bound) in [("exclusiveMinimum", "minimum"), ("exclusiveMaximum", "maximum")] {
+            if let Some(Value::Bool(on)) = out.get(exclusive).cloned() {
+                out.remove(exclusive);
+                if on && let Some(limit) = out.remove(bound) {
+                    out.insert(exclusive.into(), limit);
+                }
+            }
+        }
+        Value::Object(out)
     }
 
     /// The object a local `$ref` points to; other values as they are.

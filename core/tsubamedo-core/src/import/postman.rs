@@ -38,7 +38,7 @@ pub fn collection(doc: &Value) -> Result<Imported> {
     for v in &mut c.out {
         map_texts(&mut v.request, |t| map_builtins(t, &mut warnings));
     }
-    Ok(Imported { format: Format::Postman, name: str_at(info, "name").to_string(), requests: c.out, vars, environments: Vec::new(), warnings })
+    Ok(Imported { format: Format::Postman, name: str_at(info, "name").to_string(), requests: c.out, vars, environments: Vec::new(), warnings, files: Vec::new() })
 }
 
 /// An environment becomes one; globals become the collection's variables.
@@ -57,6 +57,7 @@ pub fn environment(doc: &Value) -> Imported {
         vars: if globals { vars.clone() } else { Vec::new() },
         environments: if globals { Vec::new() } else { vec![Environment { name, vars }] },
         warnings: Vec::new(),
+        files: Vec::new(),
     }
 }
 

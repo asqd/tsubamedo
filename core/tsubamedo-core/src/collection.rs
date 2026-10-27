@@ -170,8 +170,14 @@ impl Collection {
             if path.is_dir() {
                 if !(top && name == ENV_DIR) {
                     let rel = path.strip_prefix(&self.root).unwrap_or(&path);
+                    let (folders, requests) = (self.folders.len(), self.requests.len());
                     self.folders.push(rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"));
                     self.walk(&path, false);
+                    // A folder of other files (JSON schemas, data for bodies) is not one of requests;
+                    // an empty one is, just made.
+                    if self.requests.len() == requests && has_files(&path) {
+                        self.folders.truncate(folders);
+                    }
                 }
                 continue;
             }
@@ -187,6 +193,16 @@ impl Collection {
             }
         }
     }
+}
+
+/// Whether there is any file in the folder or below, hidden ones aside.
+fn has_files(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else { return false };
+    entries.filter_map(|e| e.ok()).any(|e| {
+        let hidden = e.file_name().to_string_lossy().starts_with('.');
+        let path = e.path();
+        !hidden && (path.is_file() || (path.is_dir() && has_files(&path)))
+    })
 }
 
 fn read_doc(path: &Path) -> Result<DocumentMut> {
@@ -215,6 +231,8 @@ mod tests {
         write(root, "orders/02-get.toml", "url = \"{{base}}/orders/1\"\n");
         write(root, "orders/01-create.toml", "name = \"Создать\"\nmethod = \"POST\"\nurl = \"{{base}}/orders\"\n");
         write(root, "orders/notes.md", "не запрос");
+        write(root, "schemas/order.json", "{}");
+        fs::create_dir_all(root.join("drafts")).unwrap();
         write(root, "broken.toml", "url = \n");
 
         let c = Collection::open(root).unwrap();
@@ -222,6 +240,7 @@ mod tests {
         assert_eq!(c.requests.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["orders/01-create", "orders/02-get"]);
         assert_eq!(c.requests[0].display_name(), "Создать");
         assert_eq!(c.broken.len(), 1);
+        assert_eq!(c.folders, ["drafts", "orders"], "папка схем — не папка запросов, пустая — да");
         assert_eq!(c.environments(), ["stage"]);
 
         let dev = c.vars(None, &Vars::new()).unwrap();

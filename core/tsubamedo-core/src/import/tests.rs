@@ -144,7 +144,14 @@ fn openapi_operations_with_examples_and_security() {
     assert_eq!(list.request.url, "{{base_url}}/pets");
     assert_eq!(list.request.query, [Pair { name: "limit".into(), value: "20".into(), enabled: false }, Pair::new("kind", "cat")]);
     assert_eq!(list.request.auth, Auth::Bearer { token: "{{token}}".into() });
-    assert_eq!(list.request.checks, [Check::new("status == 200")]);
+    assert_eq!(list.request.checks, [Check::new("status == 200"), Check::new("$ schema schemas/GET pets ответ.json")]);
+    assert_eq!(find(&i, "Один питомец").request.checks[1], Check::new("$ schema schemas/Pet.json"));
+    let files: Vec<&str> = i.files.iter().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(files, ["schemas/GET pets ответ.json", "schemas/Pet.json", "schemas/Owner.json"]);
+    let pet: Value = serde_json::from_str(&i.files[1].1).unwrap();
+    assert_eq!(pet["properties"]["born"]["type"], serde_json::json!(["string", "null"]), "nullable");
+    assert_eq!((pet["properties"]["weight"]["exclusiveMinimum"].clone(), pet["properties"]["weight"].get("minimum")), (serde_json::json!(0), None));
+    assert_eq!(pet["properties"]["parent"], serde_json::json!({"$ref": "Pet.json"}));
 
     let create = &find(&i, "createPet").request;
     let Body::Json { content } = &create.body else { panic!("{:?}", create.body) };
@@ -230,6 +237,37 @@ fn writes_a_new_collection_that_opens() {
     assert!(!fs::read_to_string(root.join(MANIFEST)).unwrap().contains("s3cr3t"));
     assert_eq!(fs::read_to_string(root.join("env/prod.toml")).unwrap(), "[vars]\n", "все значения prod — секреты");
     assert_eq!(fs::read_to_string(root.join(".gitignore")).unwrap(), "*.local.toml\n");
+}
+
+#[test]
+fn openapi_schemas_check_real_answers() {
+    use crate::checks::{Answer, run_checks};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("zoo");
+    write(&read(&fixture("openapi.yaml")).unwrap(), &root).unwrap();
+    let c = Collection::open(&root).unwrap();
+    let entry = c.requests.iter().find(|e| e.request.name.as_deref() == Some("Список питомцев")).unwrap();
+    let check = |body: &str| {
+        let r = crate::http::Response {
+            status: 200,
+            reason: "OK".into(),
+            version: "HTTP/1.1".into(),
+            headers: Vec::new(),
+            body: crate::http::ResponseBody::Memory(bytes::Bytes::from(body.to_string())),
+            wire_size: 0,
+            timings: Default::default(),
+            url: String::new(),
+            remote_addr: "127.0.0.1:80".parse().unwrap(),
+            tls: None,
+            redirects: Vec::new(),
+        };
+        let out = run_checks(&entry.request.checks, &Answer::new(&r), &Vars::new(), Some(entry.dir()));
+        (out[1].ok, out[1].error.clone().unwrap_or_default())
+    };
+    let good = r#"[{"id": 1, "name": "Барсик", "born": null, "weight": 4.5, "owner": {"email": "a@b.c", "vip": false}, "parent": {"name": "Мурка"}}]"#;
+    assert_eq!(check(good), (true, String::new()));
+    let bad = r#"[{"name": 5, "weight": 0}, {"name": "Рыжик", "parent": {"name": "Мурка", "born": 1}}]"#;
+    assert_eq!(check(bad).1, "$[0].name: ожидалось строка, а здесь число; $[0].weight: 0 не больше 0; $[1].parent.born: ожидалось null или строка, а здесь число");
 }
 
 #[test]

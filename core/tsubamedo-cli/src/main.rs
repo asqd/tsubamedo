@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use clap::{Args, Parser, Subcommand};
 use tsubamedo_core::collection::{Collection, MANIFEST};
+use tsubamedo_core::compare::{self, BodyDiff, ChangeKind, Options, Side};
 use tsubamedo_core::http::{CertSpec, ClientCert, ProxyConfig, Response, SendOptions};
 use tsubamedo_core::prepare::prepare;
 use tsubamedo_core::request_file::RequestFile;
@@ -18,7 +19,7 @@ use tsubamedo_core::{Body, Error, Pair, Request, Vars};
 
 mod junit;
 
-use format::{Paint, duration, size};
+use format::{Paint, duration, plural, size};
 
 #[derive(Parser)]
 #[command(name = "tsubamedo", version, about = "TsubameDo: HTTP-запросы и коллекции в терминале")]
@@ -33,6 +34,8 @@ enum Command {
     Send(SendArgs),
     /// Отправить запросы коллекции: каждый после тех, чьи значения он берёт, с проверками.
     Run(RunArgs),
+    /// Сравнить ответы одного запроса в двух окружениях: stage и prod.
+    Compare(CompareArgs),
     /// Проверить, что файлы читаются и все переменные заданы.
     Check(CheckArgs),
     /// Перенести коллекцию Insomnia или Postman, описание OpenAPI или Swagger, запись HAR.
@@ -151,6 +154,23 @@ struct RunArgs {
 }
 
 #[derive(Args)]
+struct CompareArgs {
+    /// Запрос коллекции (имя или файл) или адрес.
+    target: String,
+    #[command(flatten)]
+    common: Common,
+    /// С каким окружением сравнить; первое — из --env.
+    #[arg(short, long, value_name = "ОКРУЖЕНИЕ")]
+    with: String,
+    /// Не сравнивать это место JSON: $.meta.requestId, $.items[*].updatedAt или имя поля где угодно.
+    #[arg(long, value_name = "ПУТЬ")]
+    ignore: Vec<String>,
+    /// Показать и заголовки, которые меняются всегда (Date, X-Request-Id…).
+    #[arg(long)]
+    all_headers: bool,
+}
+
+#[derive(Args)]
 struct CheckArgs {
     #[arg(default_value = ".")]
     dir: PathBuf,
@@ -170,6 +190,7 @@ async fn main() -> ExitCode {
     let result = match cli.command {
         Command::Send(args) => send_one(args).await,
         Command::Run(args) => run(args).await,
+        Command::Compare(args) => compare(args).await,
         Command::Check(args) => check(args),
         Command::Import { file, to } => import(&file, to),
         Command::Init { dir } => init(&dir),
@@ -231,13 +252,13 @@ struct Target {
     dir: PathBuf,
 }
 
-fn resolve_target(args: &SendArgs) -> tsubamedo_core::Result<Target> {
-    let target = Path::new(&args.target);
+fn resolve_target(text: &str, env: Option<&str>) -> tsubamedo_core::Result<Target> {
+    let target = Path::new(text);
     let cwd = std::env::current_dir().map_err(|e| Error::io(".", e))?;
     let from_file = target.is_file() && target.extension().is_some_and(|e| e == "toml");
     let root = Collection::find_root(if from_file { target } else { &cwd });
     let collection = root.map(Collection::open).transpose()?;
-    if collection.is_none() && args.common.env.is_some() {
+    if collection.is_none() && env.is_some() {
         return Err(Error::Invalid(format!("окружение задано, но {MANIFEST} не найден ни здесь, ни выше")));
     }
     if from_file {
@@ -247,11 +268,11 @@ fn resolve_target(args: &SendArgs) -> tsubamedo_core::Result<Target> {
         let id = collection.as_ref().and_then(|c| c.requests.iter().find(|e| e.path.canonicalize().ok() == file)).map(|e| e.id.clone());
         return Ok(Target { request, collection, id, dir });
     }
-    if let Some(entry) = collection.as_ref().and_then(|c| c.find(args.target.trim_end_matches(".toml"))) {
+    if let Some(entry) = collection.as_ref().and_then(|c| c.find(text.trim_end_matches(".toml"))) {
         let (request, id, dir) = (entry.request.clone(), Some(entry.id.clone()), entry.dir().to_path_buf());
         return Ok(Target { request, collection, id, dir });
     }
-    Ok(Target { request: Request { url: args.target.clone(), ..Request::default() }, collection, id: None, dir: cwd })
+    Ok(Target { request: Request { url: text.to_string(), ..Request::default() }, collection, id: None, dir: cwd })
 }
 
 fn data_arg(value: &str) -> io::Result<String> {
@@ -267,7 +288,7 @@ fn data_arg(value: &str) -> io::Result<String> {
 }
 
 async fn send_one(args: SendArgs) -> tsubamedo_core::Result<ExitCode> {
-    let Target { mut request, collection, id, dir } = resolve_target(&args)?;
+    let Target { mut request, collection, id, dir } = resolve_target(&args.target, args.common.env.as_deref())?;
     for header in &args.headers {
         let (name, value) = header
             .split_once(':')
@@ -508,6 +529,93 @@ fn print_exchange(ex: &Exchange, collection: &Collection, args: &RunArgs, paint:
         Err(e) => println!("{mark} {title}\n    {}", paint.red(&e.to_string())),
     }
     failures
+}
+
+/// The same request in two environments, sent side by side; exit code 1 when they differ.
+async fn compare(args: CompareArgs) -> tsubamedo_core::Result<ExitCode> {
+    let Target { request, collection, id, dir } = resolve_target(&args.target, Some(&args.with))?;
+    let label = |env: Option<&str>| env.unwrap_or("без окружения").to_string();
+    let (left_env, right_env) = (args.common.env.as_deref(), Some(args.with.as_str()));
+    let send = |env: Option<&str>| -> tsubamedo_core::Result<_> {
+        let mut runner = Runner::new(collection.as_ref(), env, overrides(&args.common), Vars::new(), send_options(&args.common))?;
+        let (request, dir, id) = (request.clone(), dir.clone(), id.clone());
+        Ok(async move { runner.send(id.as_deref(), &request, &dir).await.pop().expect("the request itself is always there") })
+    };
+    let (left, right) = tokio::join!(send(left_env)?, send(right_env)?);
+    let answer = |ex: Exchange, env: Option<&str>| ex.result.map_err(|e| Error::Invalid(format!("{}: {e}", label(env))));
+    let (left, right) = (answer(left, left_env)?, answer(right, right_env)?);
+    let options = Options { ignore: args.ignore.clone(), all_headers: args.all_headers };
+    fn side(r: &Response) -> Side<'_> {
+        Side { status: r.status, headers: &r.headers, body: &r.body }
+    }
+    let result = compare::compare(&side(&left), &side(&right), &options).map_err(|e| Error::io("тело ответа", e))?;
+
+    let paint = Paint::stdout();
+    let mut out = io::stdout().lock();
+    let (l, r) = (label(left_env), label(right_env));
+    let _ = writeln!(out, "{} {}", paint.bold(&format!("{l} ⟷ {r}")), paint.dim(&format!("{} {}", request.method.to_uppercase(), left.url)));
+    let [a, b] = result.status;
+    let status = if a == b { paint.dim(&format!("статус {a} в обоих")) } else { format!("статус {} → {}", paint.status(a, &a.to_string()), paint.status(b, &b.to_string())) };
+    let _ = writeln!(out, "{status}");
+    for h in &result.headers {
+        let none = || "(нет)".to_string();
+        let _ = writeln!(out, "{} {}: {} → {}", paint.yellow("~"), h.name, h.left.clone().unwrap_or_else(none), h.right.clone().unwrap_or_else(none));
+    }
+    if result.hidden_headers > 0 {
+        let n = result.hidden_headers;
+        let what = plural(n, "заголовок, который меняется", "заголовка, которые меняются", "заголовков, которые меняются");
+        let _ = writeln!(out, "{}", paint.dim(&format!("и ещё {n} {what} всегда (--all-headers)")));
+    }
+    match &result.body {
+        BodyDiff::Same { size: s } => {
+            let _ = writeln!(out, "{}", paint.dim(&format!("тело одинаковое, {}", size(*s))));
+        }
+        BodyDiff::Json { changes, total, ignored } => {
+            for c in changes {
+                let (mark, text) = match c.kind {
+                    ChangeKind::Added => (paint.green("+"), c.right.clone().unwrap_or_default()),
+                    ChangeKind::Removed => (paint.red("-"), c.left.clone().unwrap_or_default()),
+                    ChangeKind::Changed => (paint.yellow("~"), format!("{} → {}", c.left.clone().unwrap_or_default(), c.right.clone().unwrap_or_default())),
+                    ChangeKind::Order => (paint.yellow("↕"), format!("порядок: {} → {}", c.left.clone().unwrap_or_default(), c.right.clone().unwrap_or_default())),
+                };
+                let _ = writeln!(out, "{mark} {} {text}", paint.bold(&c.path));
+            }
+            if *total > changes.len() {
+                let n = total - changes.len();
+                let _ = writeln!(out, "{}", paint.dim(&format!("и ещё {n} {}", plural(n, "изменение", "изменения", "изменений"))));
+            }
+            if *total == 0 {
+                let _ = writeln!(out, "{}", paint.dim("тело одинаковое по смыслу (порядок ключей и пробелы не в счёт)"));
+            }
+            if *ignored > 0 {
+                let _ = writeln!(out, "{}", paint.dim(&format!("не сравнивалось по --ignore: {ignored}")));
+            }
+        }
+        BodyDiff::Text { lines, truncated, .. } => {
+            for line in lines {
+                let text = match line.tag {
+                    "added" => paint.green(&format!("+ {}", line.text)),
+                    "removed" => paint.red(&format!("- {}", line.text)),
+                    "gap" => paint.dim("…"),
+                    _ => paint.dim(&format!("  {}", line.text)),
+                };
+                let _ = writeln!(out, "{text}");
+            }
+            if *truncated {
+                let _ = writeln!(out, "{}", paint.dim("показано не всё"));
+            }
+        }
+        BodyDiff::Big { sizes, first_difference } => {
+            let at = first_difference.map(|p| format!(", расходятся со строки {} (байт {})", p.line, p.byte)).unwrap_or_default();
+            let _ = writeln!(out, "тела слишком большие для сравнения по строкам: {} и {}{at}", size(sizes[0]), size(sizes[1]));
+        }
+    }
+    Ok(if result.same() {
+        let _ = writeln!(out, "{}", paint.green("Ответы одинаковые"));
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
 
 fn check(args: CheckArgs) -> tsubamedo_core::Result<ExitCode> {

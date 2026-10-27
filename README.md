@@ -277,6 +277,11 @@ token, password, key…) пишутся в `*.local.toml`. Чего в TsubameDo
   он шёл и какой сертификат ушёл серверу.
 - «Cookie» в верхней панели — банка открытого окружения: что поставили серверы, удалить одну
   или все. «Очистить историю» удаляет и cookie, и токены.
+- «Сравнить…» у ответа: с тем же запросом в другом окружении (stage и prod) или с прошлым
+  ответом из истории (сейчас и вчера). Заголовки, что меняются всегда (Date, X-Request-Id),
+  скрыты; JSON сравнивается по смыслу, с путём каждого изменения, элементы массивов с `id` —
+  по нему; текст — построчно. ⊘ у изменения — больше его не сравнивать (например,
+  `$.items[*].updatedAt`); список запоминается для запроса.
 - ⇣ (⇧⌘I) — импорт из Insomnia, Postman, OpenAPI или HAR: сначала видно, что придёт и что
   не перенесётся, потом — новой коллекцией или папкой в открытую.
 
@@ -292,6 +297,7 @@ tsubamedo run -e stage --fail                 # вся коллекция, ко�
 tsubamedo run -e stage --junit report.xml     # и отчёт JUnit XML для GitLab, Jenkins, GitHub
 tsubamedo run --filter orders --var token=$T  # только заказы; токен дан — вход не нужен
 tsubamedo run -p 4 --retry 2                  # по 4 запроса сразу, упавшие — ещё до 2 раз
+tsubamedo compare orders/list -e stage --with prod --ignore requestId  # различия, код 1
 tsubamedo check                               # все ли переменные заданы во всех окружениях
 tsubamedo import insomnia.json                # новая коллекция ./<имя> из Insomnia, Postman…
 tsubamedo import openapi.yaml --to my-api     # в коллекцию my-api, в папку по имени API

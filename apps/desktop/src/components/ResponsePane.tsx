@@ -11,11 +11,14 @@ export function ResponsePane({
   error,
   sending,
   onCancel,
+  onCompare,
 }: {
   meta: ResponseMeta | null;
   error: string | null;
   sending: boolean;
   onCancel: () => void;
+  /** Where to open the menu of what to compare with. */
+  onCompare?: (x: number, y: number) => void;
 }) {
   const [tab, setTab] = useState<Tab>("body");
 
@@ -73,6 +76,18 @@ export function ResponsePane({
         {checks.length > 0 && (
           <button className={`check-badge ${failed ? "bad" : "ok"}`} onClick={() => setTab("checks")} title="Проверки ответа">
             {failed ? "✗" : "✓"} {checks.filter((c) => c.ok).length}/{checks.length}
+          </button>
+        )}
+        {onCompare && (
+          <button
+            className="ghost small compare-btn"
+            title="Сравнить с ответом из другого окружения или с прошлым"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              onCompare(r.left, r.bottom + 4);
+            }}
+          >
+            Сравнить…
           </button>
         )}
       </div>

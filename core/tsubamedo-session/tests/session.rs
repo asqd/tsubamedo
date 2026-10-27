@@ -354,3 +354,36 @@ async fn proxy_settings_and_certificates() {
     assert!(manifest.starts_with("name = \"Банк\"\n\n[vars]\nbase = \"https://api.bank.test\"\n\n[[certificates]]\nhost = \"api.bank.test\"\n"), "{manifest}");
     assert!(!manifest.contains("key = \"\"") && manifest.contains("passphrase = \"{{cert_password}}\""), "{manifest}");
 }
+
+#[tokio::test]
+async fn compares_environments_and_history() {
+    let stage = server(r#"{"version": "1.2", "items": [{"id": 1, "price": 10}]}"#.to_string()).await;
+    let prod = server(r#"{"version": "1.3", "items": [{"id": 1, "price": 12}, {"id": 2, "price": 5}]}"#.to_string()).await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("tsubamedo.toml"), "name = \"Магазин\"\n").unwrap();
+    std::fs::create_dir_all(dir.path().join("env")).unwrap();
+    std::fs::write(dir.path().join("env/stage.toml"), format!("[vars]\nbase = \"{stage}\"\n")).unwrap();
+    std::fs::write(dir.path().join("env/prod.toml"), format!("[vars]\nbase = \"{prod}\"\n")).unwrap();
+    std::fs::write(dir.path().join("items.toml"), "url = \"{{base}}/items\"\n").unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let s = Session::with_data_dir(data.path().to_path_buf());
+    call(&s, "openCollection", json!({ "path": dir.path() })).await;
+    let request = call(&s, "getRequest", json!({ "id": "items" })).await;
+    let a = call(&s, "send", json!({ "sendId": "a", "id": "items", "request": request, "env": "stage" })).await;
+    let b = call(&s, "send", json!({ "sendId": "b", "id": "items", "request": request, "env": "prod" })).await;
+    let side = |m: &Value| json!({ "responseId": m["responseId"], "status": m["status"], "headers": m["headers"] });
+
+    let diff = call(&s, "compare", json!({ "left": side(&a), "right": side(&b), "ignore": ["version"] })).await;
+    assert_eq!(diff["status"], json!([200, 200]));
+    assert_eq!(diff["headers"], json!([]), "Content-Length is one of the ever-changing");
+    assert_eq!(diff["body"]["kind"], json!("json"));
+    let paths: Vec<&str> = diff["body"]["changes"].as_array().unwrap().iter().map(|c| c["path"].as_str().unwrap()).collect();
+    assert_eq!(paths, ["$.items[id=1].price", "$.items[id=2]"]);
+    assert_eq!(diff["body"]["ignored"], json!(1));
+
+    // With what came before: the stage answer from history, against itself now.
+    let history = call(&s, "history", json!({ "requestId": "items" })).await;
+    let stage_entry = history.as_array().unwrap().iter().find(|e| e["env"] == "stage").unwrap()["id"].clone();
+    let same = call(&s, "compare", json!({ "left": side(&a), "right": { "historyId": stage_entry } })).await;
+    assert_eq!(same["body"], json!({ "kind": "same", "size": 53 }));
+}

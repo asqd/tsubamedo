@@ -304,6 +304,7 @@ impl Session {
                 }
                 Ok(Value::Null)
             }
+            "compare" => self.compare(args(a)?).await,
             "certificates" => self.certificates(args::<EnvArg>(a)?.env).await,
             "saveCertificates" => {
                 let a: CertificatesArg = args(a)?;
@@ -560,6 +561,35 @@ impl Session {
         let runner = self.runner(a.env.as_deref(), false)?;
         let o = render_oauth(o, &runner.vars()).map_err(|e| e.to_string())?;
         Ok((o, self.state.lock().unwrap().tokens.clone()))
+    }
+
+    /// A response's status, headers and body: one in memory, or one from history.
+    fn side(&self, s: SideArg) -> Result<Answer, String> {
+        if let Some(id) = s.history_id {
+            let history = self.history().ok_or("история не ведётся")?;
+            let (entry, body) = history.get(&id).ok_or("этой записи в истории уже нет")?;
+            let body = body.ok_or("у этой записи истории нет тела: ответы больше 1 МБ не сохраняются")?;
+            let meta = entry.meta.unwrap_or(Value::Null);
+            let headers: Vec<(String, String)> = serde_json::from_value(meta["headers"].clone()).unwrap_or_default();
+            return Ok((entry.status.unwrap_or(0), headers, ResponseBody::Memory(body.into())));
+        }
+        let id = s.response_id.ok_or("не указан ответ")?;
+        let body = self.state.lock().unwrap().body(id)?;
+        Ok((s.status.unwrap_or(0), s.headers.unwrap_or_default(), body))
+    }
+
+    async fn compare(&self, a: CompareArg) -> Reply {
+        let (left, right) = (self.side(a.left)?, self.side(a.right)?);
+        let options = tsubamedo_core::compare::Options { ignore: a.ignore, all_headers: a.all_headers };
+        blocking(move || {
+            let (l, r) = (
+                tsubamedo_core::compare::Side { status: left.0, headers: &left.1, body: &left.2 },
+                tsubamedo_core::compare::Side { status: right.0, headers: &right.1, body: &right.2 },
+            );
+            let result = tsubamedo_core::compare::compare(&l, &r, &options).map_err(|e| e.to_string())?;
+            reply(result)
+        })
+        .await
     }
 
     /// The collection's client certificates and whether each can be read in this environment.
@@ -1035,6 +1065,30 @@ struct HistoryArg {
 #[derive(Deserialize)]
 struct EnvArg {
     env: Option<String>,
+}
+
+/// Status, headers and body of a response to compare.
+type Answer = (u16, Vec<(String, String)>, ResponseBody);
+
+/// A response to compare: `responseId` with what the window knows of it, or `historyId`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SideArg {
+    response_id: Option<u64>,
+    status: Option<u16>,
+    headers: Option<Vec<(String, String)>>,
+    history_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompareArg {
+    left: SideArg,
+    right: SideArg,
+    #[serde(default)]
+    ignore: Vec<String>,
+    #[serde(default)]
+    all_headers: bool,
 }
 
 #[derive(Deserialize)]

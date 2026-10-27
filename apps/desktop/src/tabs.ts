@@ -7,6 +7,8 @@ export interface Tab {
   id: string | null;
   request: Request;
   response: ResponseMeta | null;
+  /** The environment the response came from. */
+  responseEnv?: string | null;
   error: string | null;
   sendId: string | null;
   /** Opened and not touched: the next request picked in the sidebar replaces it. */

@@ -40,6 +40,9 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
     };
   }, [onClose]);
 
+  // A menu near the right edge opens its submenus to the left.
+  const flip = pos.x + (ref.current?.offsetWidth ?? 200) + 300 > window.innerWidth;
+
   const run = (item: MenuItem) => {
     item.onClick?.();
     onClose();
@@ -73,7 +76,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
               {item.submenu && <span className="faint">▸</span>}
             </button>
             {item.submenu && open === i && (
-              <div className="menu submenu" role="menu">
+              <div className={`menu submenu ${flip ? "to-left" : ""}`} role="menu">
                 {item.submenu.map((sub, j) => (
                   <button
                     key={j}

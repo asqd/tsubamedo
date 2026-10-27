@@ -36,6 +36,7 @@ rquickjs = "0.14.0"
 ring = "0.17"
 serde_yaml_ng = "0.10"
 boon = "0.6.1"
+similar = "3.2.1"
 
 [dev-dependencies]
 hyper = { version = "1", features = ["server", "http1"] }

@@ -63,6 +63,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .pad { padding: 12px 14px; }
 .pad-top { padding-top: 10px; }
 .bad-text { color: var(--bad); }
+.warn-text { color: var(--warn); }
 .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sp .7s linear infinite; vertical-align: -2px; }
 .spin.big { width: 22px; height: 22px; border-width: 3px; color: var(--accent); }
 @keyframes sp { to { transform: rotate(360deg); } }
@@ -284,6 +285,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .menu-item.danger:hover { background: var(--bad); color: #fff; }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 .menu.submenu { position: absolute; left: calc(100% - 4px); top: -5px; max-height: 60vh; overflow: auto; }
+.menu.submenu.to-left { left: auto; right: calc(100% - 4px); }
 .menu-ask { padding: 6px 10px; max-width: 260px; }
 .menu-ask-row { display: flex; gap: 6px; margin-top: 6px; }
 button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
@@ -305,6 +307,29 @@ button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 .check-row > span:first-child { width: 14px; text-align: center; font-weight: 700; }
 .check-why { flex-basis: 100%; padding-left: 22px; white-space: pre-wrap; word-break: break-word; }
 .work { position: relative; }
+.compare-btn { margin-left: auto; }
+.compare-options { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.compare-options input.mono { flex: 1; min-width: 0; }
+.compare-options label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.compare-body { padding: 10px 14px 16px; }
+.compare-summary { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 10px; font-weight: 600; }
+.cmp-left { color: var(--bad); }
+.cmp-right { color: var(--ok); }
+.cmp-table { width: 100%; border-collapse: collapse; table-layout: fixed; margin: 0 0 12px; }
+.cmp-table td { padding: 4px 8px 4px 0; vertical-align: top; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.cmp-table td.cmp-mark { width: 16px; font-weight: 700; text-align: center; }
+.cmp-table td.cmp-path { width: 36%; position: relative; padding-right: 22px; }
+.cmp-table tr.cmp-added .cmp-mark { color: var(--ok); }
+.cmp-table tr.cmp-removed .cmp-mark { color: var(--bad); }
+.cmp-table tr.cmp-changed .cmp-mark, .cmp-table tr.cmp-order .cmp-mark { color: var(--warn); }
+.cmp-skip { position: absolute; right: 2px; top: 2px; opacity: 0; }
+.cmp-table tr:hover .cmp-skip { opacity: .7; }
+.cmp-lines { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.cmp-line { display: grid; grid-template-columns: 42px 42px 14px minmax(0, 1fr); gap: 6px; padding: 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cmp-line > span:first-child, .cmp-line > span:nth-child(2) { text-align: right; }
+.cmp-line.added { background: var(--ok-weak); }
+.cmp-line.removed { background: var(--bad-weak); }
+.cmp-gap { padding: 0 6px; color: var(--faint); background: var(--sunken); }
 .run-panel { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; background: var(--panel); border-top: 1px solid var(--line); }
 .run-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .run-summary { padding: 10px 14px; font-weight: 600; }

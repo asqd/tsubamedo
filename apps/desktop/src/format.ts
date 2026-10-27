@@ -39,3 +39,14 @@ export function statusTone(status: number): "ok" | "redirect" | "warn" | "bad" {
   if (status < 500) return "warn";
   return "bad";
 }
+
+/** «сегодня 14:03», «вчера 09:12», «27 октября 18:40». */
+export function when(at: number): string {
+  const d = new Date(at);
+  const today = new Date();
+  const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((start(today) - start(d)) / 86_400_000);
+  const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const date = days === 0 ? "сегодня" : days === 1 ? "вчера" : d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  return `${date} ${time}`;
+}

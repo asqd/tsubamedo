@@ -50,6 +50,39 @@ export interface TokenInfo {
   scope: string | null;
 }
 
+/** Two responses side by side; see core/src/compare.rs. */
+export interface Comparison {
+  status: [number, number];
+  /** Only those that differ. */
+  headers: { name: string; left: string | null; right: string | null }[];
+  /** Ever-changing headers (Date, request ids) that differ and are not shown. */
+  hiddenHeaders: number;
+  body: BodyDiff;
+}
+
+export type BodyDiff =
+  | { kind: "same"; size: number }
+  | { kind: "json"; changes: JsonChange[]; total: number; ignored: number }
+  | { kind: "text"; lines: DiffLine[]; added: number; removed: number; truncated: boolean }
+  | { kind: "big"; sizes: [number, number]; firstDifference: { line: number; byte: number } | null };
+
+export interface JsonChange {
+  path: string;
+  kind: "added" | "removed" | "changed" | "order";
+  left: string | null;
+  right: string | null;
+}
+
+export interface DiffLine {
+  tag: "same" | "added" | "removed" | "gap";
+  left: number | null;
+  right: number | null;
+  text: string;
+}
+
+/** A response in memory (with what the window knows of it), or one from history. */
+export type CompareSide = { responseId: number; status: number; headers: [string, string][] } | { historyId: string };
+
 export type ProxyConfig = { mode: "system" } | { mode: "none" } | { mode: "custom"; url: string; noProxy: string };
 
 /** What the system says about proxies: environment variables or the macOS settings. */
@@ -367,6 +400,8 @@ export const api = {
     call<{ steps: RunStep[]; results: RunResult[]; totalMs: number }>("runCollection", { sendId, folder, env, parallel, retries, only }),
   /** What a run has done so far; null once it is over. */
   runProgress: (sendId: string) => call<RunProgress | null>("runProgress", { sendId }),
+  compare: (left: CompareSide, right: CompareSide, ignore: string[], allHeaders: boolean) =>
+    call<Comparison>("compare", { left, right, ignore, allHeaders }),
   proxySettings: () => call<{ proxy: ProxyConfig; system: SystemProxy }>("proxySettings"),
   saveProxy: (proxy: ProxyConfig) => call<null>("saveProxy", { proxy }),
   certificates: (env: string | null) => call<CertEntry[]>("certificates", { env }),

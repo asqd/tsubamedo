@@ -2,6 +2,9 @@
 // Edits are saved to the request's file as you type; the core rewrites only what changed.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, CollectionInfo, emptyRequest, ImportPreview, Reorganized, Request } from "./api";
+import { when } from "./format";
+import { ComparePanel, CompareState } from "./components/ComparePanel";
+import { ContextMenu, MenuItem } from "./components/ContextMenu";
 import { CookiesDialog } from "./components/CookiesDialog";
 import { ImportDialog, ImportTarget } from "./components/ImportDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -64,6 +67,8 @@ export default function App() {
   const [historyVersion, setHistoryVersion] = useState(0);
   const [renameTarget, setRenameTarget] = useState<{ kind: Kind; path: string; n: number } | null>(null);
   const [run, setRun] = useState<RunState | null>(null);
+  const [compare, setCompare] = useState<CompareState | null>(null);
+  const [compareMenu, setCompareMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [runSettings, setRunSettings] = useState<RunSettings>(() => {
     try {
       return { parallel: 1, retries: 0, ...JSON.parse(store.get("run") ?? "{}") };
@@ -126,6 +131,8 @@ export default function App() {
   // with a 300 MB answer gives its memory back. Responses newer than any a tab has had are
   // still on their way to one and stay.
   const shown = tabs.flatMap((t) => (t.response ? [t.response.responseId] : []));
+  // The answer from another environment lives while the comparison is open.
+  if (compare?.right && "responseId" in compare.right) shown.push(compare.right.responseId);
   const seenResponse = useRef(0);
   useEffect(() => {
     seenResponse.current = Math.max(seenResponse.current, ...shown);
@@ -283,7 +290,7 @@ export default function App() {
     patchTab(current.key, { sendId, error: null, pristine: false });
     try {
       const meta = await api.send(sendId, current.id, current.request, env, false);
-      patchTab(current.key, { response: meta, sendId: null });
+      patchTab(current.key, { response: meta, responseEnv: env, sendId: null });
     } catch (e) {
       const message = (e as Error).message;
       patchTab(current.key, { sendId: null, error: message === "Отменено" ? null : message });
@@ -292,6 +299,55 @@ export default function App() {
     // Values captured from the response (or those sent first) are variables now.
     loadVars();
   }, [active, flushSave, patchTab, env, loadVars]);
+
+  /** «Сравнить» on a response: with another environment (sent now) or an earlier answer. */
+  const openCompareMenu = useCallback(
+    async (x: number, y: number) => {
+      const current = tabsRef.current.find((t) => t.key === active);
+      const meta = current?.response;
+      if (!current || !meta) return;
+      const leftEnv = current.responseEnv !== undefined ? current.responseEnv : env;
+      const left = {
+        side: { responseId: meta.responseId, status: meta.status, headers: meta.headers },
+        label: `${leftEnv ?? "без окружения"}, ${when(meta.receivedAt)}`,
+      };
+      const others: (string | null)[] = [...(leftEnv ? [null] : []), ...(collection?.environments ?? []).filter((e) => e !== leftEnv)];
+      const withEnv = (target: string | null) => async () => {
+        await flushSave();
+        const sendId = crypto.randomUUID();
+        setCompare({ requestId: current.id, left, rightLabel: target ?? "без окружения", right: null, sendId, error: null });
+        const update = (patch: Partial<CompareState>) => setCompare((c) => (c?.sendId === sendId ? { ...c, ...patch } : c));
+        try {
+          const other = await api.send(sendId, current.id, current.request, target, false);
+          update({ right: { responseId: other.responseId, status: other.status, headers: other.headers }, rightLabel: `${target ?? "без окружения"}, ${when(other.receivedAt)}` });
+        } catch (e) {
+          const message = (e as Error).message;
+          if (message === "Отменено") setCompare(null);
+          else update({ error: `${target ?? "без окружения"}: ${message}` });
+        }
+        setHistoryVersion((v) => v + 1);
+      };
+      // Earlier answers of this request whose body was kept, without the one on screen.
+      const earlier = current.id ? (await api.history(current.id).catch(() => [])).filter((h) => h.hasBody && Math.abs(h.at - meta.receivedAt) > 2000).slice(0, 12) : [];
+      const items: MenuItem[] = [
+        {
+          label: "С окружением",
+          disabled: others.length === 0,
+          submenu: others.map((e) => ({ label: e ?? "без окружения", onClick: withEnv(e) })),
+        },
+        {
+          label: "С прошлым ответом",
+          disabled: earlier.length === 0,
+          submenu: earlier.map((h) => ({
+            label: `${when(h.at)} · ${h.env ?? "без окружения"} · ${h.status ?? "—"}`,
+            onClick: () => setCompare({ requestId: current.id, left, rightLabel: `${h.env ?? "без окружения"}, ${when(h.at)}`, right: { historyId: h.id }, sendId: null, error: null }),
+          })),
+        },
+      ];
+      setCompareMenu({ x, y, items });
+    },
+    [active, env, collection, flushSave],
+  );
 
   /** Runs the collection (`folder` empty), a folder, or `only` these requests, in the panel
    * over the editors; the panel follows the run as it goes. */
@@ -644,6 +700,16 @@ export default function App() {
           <div className="workspace">
             <TabBar tabs={tabs} active={tab.key} onSelect={activate} onClose={closeTab} onNew={newScratch} />
             <div className="work">
+              {compare && (
+                <ComparePanel
+                  state={compare}
+                  onCancel={() => compare.sendId && api.cancel(compare.sendId)}
+                  onClose={() => {
+                    if (compare.sendId && !compare.right) api.cancel(compare.sendId);
+                    setCompare(null);
+                  }}
+                />
+              )}
               {run && (
                 <RunPanel
                   run={run}
@@ -686,6 +752,7 @@ export default function App() {
                   error={tab.error}
                   sending={Boolean(tab.sendId)}
                   onCancel={() => tab.sendId && api.cancel(tab.sendId)}
+                  onCompare={(x, y) => openCompareMenu(x, y)}
                 />
               </section>
             </div>
@@ -707,6 +774,7 @@ export default function App() {
             )}
           </div>
         )}
+        {compareMenu && <ContextMenu x={compareMenu.x} y={compareMenu.y} items={compareMenu.items} onClose={() => setCompareMenu(null)} />}
         {cookiesOpen && <CookiesDialog env={env} onClose={() => setCookiesOpen(false)} />}
         {settingsOpen && <SettingsDialog collection={collection} env={env} onClose={() => setSettingsOpen(false)} />}
         {importing && (

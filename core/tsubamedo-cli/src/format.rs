@@ -29,6 +29,15 @@ pub fn duration(d: Duration) -> String {
     }
 }
 
+/// The Russian form for the number: 1 заголовок, 2 заголовка, 5 заголовков.
+pub fn plural<'a>(n: usize, one: &'a str, few: &'a str, many: &'a str) -> &'a str {
+    match (n % 10, n % 100) {
+        (1, r) if r != 11 => one,
+        (2..=4, r) if !(12..=14).contains(&r) => few,
+        _ => many,
+    }
+}
+
 pub struct Paint(bool);
 
 impl Paint {

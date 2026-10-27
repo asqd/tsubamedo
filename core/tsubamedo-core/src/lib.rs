@@ -11,6 +11,7 @@
 //! - [`prepare`] — variables substituted, auth and body turned into bytes and headers.
 //! - [`http`] — sending with a time for every phase; big bodies go to a temporary file.
 //! - [`view`] — lines of a body (raw or pretty JSON) for a viewer that never loads it whole.
+//! - [`compare`] — two responses side by side: status, headers, JSON by meaning, text by lines.
 //! - [`checks`] — response checks (`status == 200`, `$.items count > 0`) and captured values.
 //! - [`schema`] — JSON Schema for the `schema` check.
 //! - [`run`] — requests that take values from each other's responses, in the right order.
@@ -19,6 +20,7 @@
 
 pub mod checks;
 pub mod collection;
+pub mod compare;
 pub mod cookies;
 pub mod curl;
 pub mod digest;

@@ -9,7 +9,7 @@ import { PairsTable } from "./PairsTable";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
-type Tab = "query" | "headers" | "auth" | "body" | "checks" | "options";
+type Tab = "query" | "headers" | "auth" | "body" | "checks" | "scripts" | "options";
 
 export function RequestEditor({
   request,
@@ -41,6 +41,7 @@ export function RequestEditor({
     ["auth", "Авторизация", request.auth.type === "none" ? null : "●"],
     ["body", "Тело", request.body.type === "none" ? null : "●"],
     ["checks", "Проверки", on(request.checks) + on(request.captures) || null],
+    ["scripts", "Скрипты", request.scripts.before.trim() || request.scripts.after.trim() ? "●" : null],
     ["options", "Настройки", Object.values(request.options).some((v) => v != null) ? "●" : null],
   ];
 
@@ -112,6 +113,7 @@ export function RequestEditor({
             saved={Boolean(saved)}
           />
         )}
+        {tab === "scripts" && <ScriptsEditor scripts={request.scripts} onChange={(scripts) => set({ scripts })} onSubmit={onSend} />}
         {tab === "options" && (
           <div className="form">
             <label>
@@ -137,6 +139,43 @@ export function RequestEditor({
             </label>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ScriptsEditor({ scripts, onChange, onSubmit }: { scripts: Request["scripts"]; onChange: (s: Request["scripts"]) => void; onSubmit: () => void }) {
+  return (
+    <div className="scripts-editor">
+      <div className="section-head">До запроса</div>
+      <div className="hint">
+        Видит запрос как в файле, с <code>{"{{переменными}}"}</code>, и может его менять. Переменные из <code>vars.set</code> подставятся в этот же
+        запрос.
+      </div>
+      <CodeEditor
+        mode="js"
+        className="code script"
+        value={scripts.before}
+        placeholder={'vars.set("ts", Date.now());\nrequest.headers.set("X-Sign", crypto.hmac("sha256", vars.get("secret"), vars.render(request.body)));'}
+        onChange={(before) => onChange({ ...scripts, before })}
+        onSubmit={onSubmit}
+      />
+      <div className="section-head">После ответа</div>
+      <div className="hint">
+        <code>response.json()</code>, <code>response.status</code>, <code>response.headers.get(…)</code>. Тесты встают рядом с проверками, а{" "}
+        <code>vars.set</code> отдаёт значение другим запросам — они отправят этот сами, если значения ещё нет.
+      </div>
+      <CodeEditor
+        mode="js"
+        className="code script"
+        value={scripts.after}
+        placeholder={'const order = response.json();\nvars.set("order_id", order.id);\ntest("заказ создан", () => expect(order.status).toBe("new"));'}
+        onChange={(after) => onChange({ ...scripts, after })}
+        onSubmit={onSubmit}
+      />
+      <div className="hint">
+        JavaScript в QuickJS, без файлов и сети, до 5 секунд. Работает и в <code>tsubamedo run</code>. Ещё есть <code>crypto.sha256</code>,{" "}
+        <code>crypto.hmac</code>, <code>btoa</code>/<code>atob</code>, <code>console.log</code> — в журнал под ответом.
       </div>
     </div>
   );

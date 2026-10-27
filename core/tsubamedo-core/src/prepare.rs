@@ -135,7 +135,14 @@ pub fn variables(request: &Request, vars: &Vars) -> BTreeSet<String> {
     for text in texts {
         r.render(text);
     }
-    r.used().clone()
+    let mut used = r.used().clone();
+    used.extend(scripts_variables(request));
+    used
+}
+
+/// Variables the scripts read by name: `vars.get("token")`, `vars.has('id')`.
+pub fn scripts_variables(request: &Request) -> BTreeSet<String> {
+    [&request.scripts.before, &request.scripts.after].into_iter().flat_map(|s| crate::scripts::reads(s)).collect()
 }
 
 /// Like the address bar: `example.com/x` means `http://example.com/x`.

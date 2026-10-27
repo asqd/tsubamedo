@@ -54,6 +54,8 @@ export interface Request {
   /** Variables kept from the response: name → `$.token`, `header Location`… */
   captures: Pair[];
   checks: Check[];
+  /** JavaScript before and after the request. */
+  scripts: { before: string; after: string };
 }
 
 export interface RequestItem {
@@ -106,6 +108,8 @@ export interface ResponseMeta {
   captures?: Captured[];
   /** Requests sent first for the values this one needed. */
   before?: Before[];
+  /** What the scripts wrote with console.log. */
+  logs?: string[];
 }
 
 export interface CheckResult {
@@ -269,4 +273,5 @@ export const emptyRequest = (): Request => ({
   options: { followRedirects: null, timeoutMs: null, verifyTls: null },
   captures: [],
   checks: [],
+  scripts: { before: "", after: "" },
 });

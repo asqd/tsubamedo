@@ -544,6 +544,7 @@ impl Session {
                     "failures": ex.failures(),
                     "checks": ex.checks.len(),
                     "checksPassed": ex.checks.iter().filter(|c| c.ok).count(),
+                    "logs": ex.logs,
                 })
             })
             .collect();
@@ -918,6 +919,8 @@ struct ResponseMeta {
     captures: Vec<Captured>,
     /// Requests sent first for the values this one needed.
     before: Vec<Before>,
+    /// What the scripts wrote with `console.log`.
+    logs: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -970,6 +973,7 @@ impl ResponseMeta {
             checks: ex.checks.clone(),
             captures: ex.captures.clone(),
             before: Vec::new(),
+            logs: ex.logs.clone(),
         }
     }
 }

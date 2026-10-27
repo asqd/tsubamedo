@@ -253,9 +253,9 @@ async fn send_one(args: SendArgs) -> tsubamedo_core::Result<ExitCode> {
     Ok(if !passed || (args.fail && response.status >= 400) { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
 
-/// ✓ and ✗ under a request: its checks, and what it captured or could not.
+/// Under a request: what its scripts logged, its checks, and what it captured or could not.
 fn check_lines(ex: &Exchange, paint: &Paint) -> Vec<String> {
-    let mut out = Vec::new();
+    let mut out: Vec<String> = ex.logs.iter().map(|l| format!("  {}", paint.dim(&format!("› {l}")))).collect();
     for c in &ex.checks {
         if c.ok {
             out.push(format!("  {} {}", paint.green("✓"), paint.dim(&c.check)));

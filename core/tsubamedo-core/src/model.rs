@@ -20,6 +20,21 @@ pub struct Request {
     /// What the response must be: `status == 200`, `$.items count > 0`.
     #[serde(default)]
     pub checks: Vec<Check>,
+    #[serde(default)]
+    pub scripts: Scripts,
+}
+
+/// JavaScript before and after the request; see [`crate::scripts`].
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Scripts {
+    pub before: String,
+    pub after: String,
+}
+
+impl Scripts {
+    pub fn is_empty(&self) -> bool {
+        self.before.trim().is_empty() && self.after.trim().is_empty()
+    }
 }
 
 /// One line of the response checks; see [`crate::checks`].
@@ -48,6 +63,7 @@ impl Default for Request {
             options: RequestOptions::default(),
             captures: Vec::new(),
             checks: Vec::new(),
+            scripts: Scripts::default(),
         }
     }
 }

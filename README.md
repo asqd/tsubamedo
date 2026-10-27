@@ -111,8 +111,42 @@ $.id == {{order_id}}
 $.error not exists
 ```
 
+### Скрипты
+
+Когда строк проверок мало — JavaScript до и после запроса. Он выполняется в ядре (QuickJS),
+поэтому одинаково работает в приложении и в `tsubamedo run`:
+
+```toml
+[scripts]
+before = '''
+vars.set("ts", Date.now());          // {{ts}} подставится в этот же запрос
+request.headers.set("X-Sign", crypto.hmac("sha256", vars.get("secret"), vars.render(request.body)));
+'''
+after = '''
+const order = response.json();
+vars.set("order_id", order.id);      // как [capture]: другие запросы отправят этот сами
+test("заказ оплачен", () => expect(order.status).toBe("paid"));
+console.log("товаров", order.items.length);
+'''
+```
+
+- `vars` — `get`, `set`, `has`, `render(текст)`.
+- `request` — `method`, `url`, `headers` и `query` (`get`, `set`, `has`, `remove`, `all`), `body`
+  (текст JSON или просто текст; можно присвоить объект). До запроса — как в файле, с
+  `{{переменными}}`, и его можно менять; после — то, что ушло, только для чтения.
+- `response` (после) — `status`, `statusText`, `time`, `size`, `headers`, `text()`, `json()`.
+- `test(имя, () => …)` и `expect(x)`: `toBe`, `toEqual`, `toContain`, `toMatch`, `toHaveLength`,
+  `toHaveProperty`, `toBeGreaterThan`, `toBeLessThan`, `toBeTruthy`, `toBeDefined`… и `.not`.
+  Тесты стоят рядом с проверками, в отчёте JUnit тоже.
+- `console.log` — в журнал под ответом и в вывод CLI; `crypto.sha1/sha256/sha512/hmac`
+  (hex или base64), `crypto.randomUUID()`, `btoa`/`atob` (строки UTF-8).
+
+Песочница: без файлов, сети, модулей и таймеров; 5 секунд и 256 МБ на скрипт. Ошибка в
+скрипте до запроса останавливает запрос, после — считается упавшей проверкой; строка ошибки
+указана.
+
 Переменные подставляются в порядке силы: коллекция → её `.local` → окружение → его `.local` →
-значения из ответов → `--var` из командной строки. Встроенные: `{{$uuid}}`, `{{$timestamp}}`, `{{$timestampMs}}`,
+значения из ответов и скриптов → `--var` из командной строки. Встроенные: `{{$uuid}}`, `{{$timestamp}}`, `{{$timestampMs}}`,
 `{{$randomInt}}`, `{{$env.ИМЯ}}` (переменная окружения процесса — удобно для секретов в CI).
 
 ## Приложение
@@ -129,6 +163,8 @@ $.error not exists
   `~/Library/Application Support/app.tsubamedo.TsubameDo`, в git не попадает.
 - Вкладка «Проверки» у запроса: проверки ответа (непонятная строка помечается сразу) и
   значения из ответа. У ответа — что прошло, что нет и что пришло вместо ожидаемого.
+- Вкладка «Скрипты»: JavaScript до запроса и после ответа, с подсветкой и подсказками
+  `vars.`, `request.`, `response.`, `expect(…).`.
 - ▶ в боковой панели запускает всю коллекцию, «Запустить папку» в меню папки — одну папку.
 
 ## CLI

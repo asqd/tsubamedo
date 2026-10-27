@@ -48,8 +48,9 @@ export function ResponsePane({
   const checks = meta.checks ?? [];
   const captures = meta.captures ?? [];
   const before = meta.before ?? [];
+  const logs = meta.logs ?? [];
   const failed = checks.filter((c) => !c.ok).length + captures.filter((c) => c.error).length + before.filter((b) => !b.passed).length;
-  const hasChecks = checks.length + captures.length + before.length > 0;
+  const hasChecks = checks.length + captures.length + before.length + logs.length > 0;
   return (
     <div className="response">
       <div className="status-line">
@@ -79,7 +80,7 @@ export function ResponsePane({
         {(
           [
             ["body", "Тело"],
-            ...(hasChecks ? [["checks", failed ? `Проверки ✗${failed}` : "Проверки"]] : []),
+            ...(hasChecks ? [["checks", failed ? `Проверки ✗${failed}` : checks.length + captures.length + before.length ? "Проверки" : "Журнал"]] : []),
             ["headers", `Заголовки ${meta.headers.length}`],
             ["time", "Время"],
             ["sent", "Отправлено"],
@@ -153,6 +154,12 @@ function ChecksResult({ meta }: { meta: ResponseMeta }) {
           <div className={`check-why small mono sel ${c.error ? "bad-text" : "faint"}`}>{c.error ?? short(c.value ?? "")}</div>
         </div>
       ))}
+      {(meta.logs ?? []).length > 0 && (
+        <>
+          <div className="section-head">Журнал скриптов</div>
+          <pre className="script-log mono small sel">{(meta.logs ?? []).join("\n")}</pre>
+        </>
+      )}
     </div>
   );
 }

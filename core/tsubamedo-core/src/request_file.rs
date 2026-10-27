@@ -38,6 +38,12 @@
 //! # Values from the response for other requests: they use {{token}}.
 //! [capture]
 //! token = '$.token'
+//!
+//! # JavaScript before and after the request (see `scripts`).
+//! [scripts]
+//! after = '''
+//! test("есть заказы", () => expect(response.json().items).not.toHaveLength(0));
+//! '''
 //! ```
 //!
 //! (`checks` is written before the first table, as TOML requires of top-level keys.)
@@ -51,7 +57,7 @@ use std::path::{Path, PathBuf};
 
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
-use crate::model::{ApiKeyLocation, Auth, Body, Check, Pair, Part, Request, RequestOptions};
+use crate::model::{ApiKeyLocation, Auth, Body, Check, Pair, Part, Request, RequestOptions, Scripts};
 use crate::{Error, Result};
 
 pub struct RequestFile {
@@ -113,6 +119,7 @@ impl RequestFile {
         sync_options(root, &request.options);
         sync_pairs(root, "capture", &request.captures);
         sync_checks(root, &request.checks);
+        sync_scripts(root, &request.scripts);
     }
 
     pub fn text(&self) -> String {
@@ -155,6 +162,17 @@ pub(crate) fn parse_request(root: &Item) -> Result<Request, String> {
         options: parse_options(t.get("options"))?,
         captures: pairs(t.get("capture"), "capture")?,
         checks: parse_checks(t.get("checks"))?,
+        scripts: parse_scripts(t.get("scripts"))?,
+    })
+}
+
+fn parse_scripts(item: Option<&Item>) -> Result<Scripts, String> {
+    let Some(t) = item.and_then(Item::as_table_like) else {
+        return if item.is_some() { Err("scripts должен быть таблицей".into()) } else { Ok(Scripts::default()) };
+    };
+    Ok(Scripts {
+        before: opt_str(t, "before")?.unwrap_or_default(),
+        after: opt_str(t, "after")?.unwrap_or_default(),
     })
 }
 
@@ -610,6 +628,19 @@ fn sync_checks(root: &mut Item, checks: &[Check]) {
     set_value(t, "checks", Value::Array(array));
 }
 
+fn sync_scripts(root: &mut Item, scripts: &Scripts) {
+    if parse_scripts(root.get("scripts")).as_ref() == Ok(scripts) {
+        return;
+    }
+    if scripts.is_empty() {
+        remove(root, "scripts");
+        return;
+    }
+    let text = |s: &str| (!s.trim().is_empty()).then(|| if s.ends_with('\n') { s.to_string() } else { format!("{s}\n") });
+    let (before, after) = (text(&scripts.before), text(&scripts.after));
+    sync_section(root, "scripts", &["before", "after"], &[("before", before.as_deref()), ("after", after.as_deref())]);
+}
+
 fn sync_options(root: &mut Item, options: &RequestOptions) {
     if *options == RequestOptions::default() {
         remove(root, "options");
@@ -749,6 +780,23 @@ content = '''
         r.checks.pop();
         r.checks.clear();
         r.captures.clear();
+        f.update(&r);
+        assert_eq!(f.text(), SAMPLE);
+    }
+
+    #[test]
+    fn scripts_are_multiline_blocks() {
+        let mut f = sample();
+        let mut r = f.request().unwrap();
+        r.scripts.after = "const o = response.json();\nvars.set(\"id\", o.id);".into();
+        f.update(&r);
+        let text = f.text();
+        assert!(text.ends_with("[scripts]\nafter = '''\nconst o = response.json();\nvars.set(\"id\", o.id);\n'''\n"), "{text}");
+        r.scripts.after.push('\n');
+        assert_eq!(f.request().unwrap(), r);
+        f.update(&r);
+        assert_eq!(f.text(), text);
+        r.scripts.after.clear();
         f.update(&r);
         assert_eq!(f.text(), SAMPLE);
     }

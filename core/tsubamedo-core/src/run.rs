@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use crate::checks::{self, Answer, CheckResult, Captured};
 use crate::collection::{Collection, Entry};
 use crate::http::{self, Response, SendOptions};
-use crate::prepare::{Prepared, prepare, variables};
+use crate::prepare::{Prepared, prepare, scripts_variables, variables};
+use crate::scripts;
 use crate::{Error, Request, Result, Vars};
 
 /// How deep requests may pull in other requests.
@@ -26,12 +27,14 @@ pub struct Source {
     pub dir: PathBuf,
 }
 
-/// Which request captures each variable; the first in the collection's order wins.
+/// Which request captures each variable (in `[capture]` or with `vars.set` in its script after
+/// the response); the first in the collection's order wins.
 pub fn producers(collection: &Collection) -> BTreeMap<String, Source> {
     let mut out = BTreeMap::new();
     for entry in &collection.requests {
-        for capture in entry.request.captures.iter().filter(|c| c.enabled) {
-            out.entry(capture.name.trim().to_string()).or_insert_with(|| Source {
+        let captured = entry.request.captures.iter().filter(|c| c.enabled).map(|c| c.name.trim().to_string());
+        for name in captured.chain(scripts::sets(&entry.request.scripts.after)) {
+            out.entry(name).or_insert_with(|| Source {
                 id: entry.id.clone(),
                 request: entry.request.clone(),
                 dir: entry.dir().to_path_buf(),
@@ -50,6 +53,8 @@ pub struct Exchange {
     pub result: Result<Response>,
     pub checks: Vec<CheckResult>,
     pub captures: Vec<Captured>,
+    /// What the scripts wrote with `console.log`.
+    pub logs: Vec<String>,
 }
 
 impl Exchange {
@@ -152,56 +157,108 @@ impl Runner {
         before: &'a mut Vec<Exchange>,
     ) -> std::pin::Pin<Box<dyn Future<Output = Exchange> + Send + 'a>> {
         Box::pin(async move {
-            let mut prepared = prepare(&request, &self.vars(), &dir);
-            if let Err(Error::UndefinedVars(missing)) = &prepared
-                && depth < MAX_CHAIN
-            {
-                let mut sent_any = false;
-                for name in missing {
-                    // An earlier request of this loop may have brought it on the way.
-                    if self.captured.contains_key(name) {
-                        continue;
+            // The script before may set variables this request uses, so it runs before
+            // substitution, and again if requests had to be sent first for missing values.
+            let wanted = scripts_variables(&request);
+            let mut logs = Vec::new();
+            let mut set_by_script = Vec::new();
+            let mut tried_producers = false;
+            let (scripted, prepared) = loop {
+                let scripted = if request.scripts.before.trim().is_empty() {
+                    request.clone()
+                } else {
+                    let (scripted, out) = scripts::before(&request.scripts.before, &request, &self.vars());
+                    logs.extend(out.logs);
+                    for (name, value) in out.vars {
+                        self.captured.insert(name.clone(), value.clone());
+                        set_by_script.retain(|c: &Captured| c.name != name);
+                        set_by_script.push(Captured { name, value: Some(value), error: None });
                     }
-                    let Some(source) = self.producers.get(name) else { continue };
-                    if Some(&source.id) == id.as_ref() || self.failed.contains(&source.id) {
-                        continue;
+                    if let Some(e) = out.error {
+                        let result = Err(Error::Script(format!("скрипт до запроса: {e}")));
+                        return Exchange { id, request, sent: None, result, checks: Vec::new(), captures: set_by_script, logs };
                     }
-                    let source = source.clone();
-                    let done = self.exchange(Some(source.id.clone()), source.request, source.dir, depth + 1, before).await;
-                    if done.result.is_err() || done.captures.iter().any(|c| c.error.is_some()) {
-                        self.failed.insert(source.id);
-                    }
-                    before.push(done);
-                    sent_any = true;
+                    scripted
+                };
+                let prepared = prepare(&scripted, &self.vars(), &dir);
+                if tried_producers || depth >= MAX_CHAIN {
+                    break (scripted, prepared);
                 }
-                if sent_any {
-                    prepared = prepare(&request, &self.vars(), &dir);
+                let vars = self.vars();
+                let mut missing = match &prepared {
+                    Err(Error::UndefinedVars(names)) => names.clone(),
+                    _ => Vec::new(),
+                };
+                missing.extend(wanted.iter().filter(|n| !vars.contains_key(*n)).cloned());
+                tried_producers = true;
+                if !self.send_producers(&missing, id.as_deref(), depth, before).await {
+                    break (scripted, prepared);
                 }
-            }
+            };
             let prepared = match prepared {
                 Ok(p) => p,
-                Err(e) => return Exchange { id, request, sent: None, result: Err(e), checks: Vec::new(), captures: Vec::new() },
+                Err(e) => return Exchange { id, request, sent: None, result: Err(e), checks: Vec::new(), captures: set_by_script, logs },
             };
             let options = self.options.for_request(&prepared);
             let result = http::send(&prepared, &options).await;
-            let (checks, captures) = match &result {
-                Ok(response) => self.read(&request, response),
+            let (checks, mut captures) = match &result {
+                Ok(response) => self.read(&scripted, &prepared, response, &mut logs),
                 Err(_) => (Vec::new(), Vec::new()),
             };
-            Exchange { id, request, sent: Some(prepared), result, checks, captures }
+            set_by_script.retain(|c| !captures.iter().any(|x| x.name == c.name));
+            captures.splice(0..0, set_by_script);
+            Exchange { id, request, sent: Some(prepared), result, checks, captures, logs }
         })
     }
 
-    /// Captures first, so checks can use what was just captured.
-    fn read(&mut self, request: &Request, response: &Response) -> (Vec<CheckResult>, Vec<Captured>) {
+    /// Sends the requests that capture the missing variables; whether any went.
+    async fn send_producers(&mut self, missing: &[String], id: Option<&str>, depth: usize, before: &mut Vec<Exchange>) -> bool {
+        let mut sent_any = false;
+        for name in missing {
+            // An earlier request of this loop may have brought it on the way.
+            if self.captured.contains_key(name) {
+                continue;
+            }
+            let Some(source) = self.producers.get(name) else { continue };
+            if Some(source.id.as_str()) == id || self.failed.contains(&source.id) {
+                continue;
+            }
+            let source = source.clone();
+            let done = self.exchange(Some(source.id.clone()), source.request, source.dir, depth + 1, before).await;
+            if done.result.is_err() || done.captures.iter().any(|c| c.error.is_some()) {
+                self.failed.insert(source.id);
+            }
+            before.push(done);
+            sent_any = true;
+        }
+        sent_any
+    }
+
+    /// Captures first, then the script after, then the checks, so each can use what the one
+    /// before it set.
+    fn read(&mut self, request: &Request, sent: &Prepared, response: &Response, logs: &mut Vec<String>) -> (Vec<CheckResult>, Vec<Captured>) {
         let answer = Answer::new(response);
-        let captures = checks::capture(&request.captures, &answer);
+        let mut captures = checks::capture(&request.captures, &answer);
         for c in &captures {
             if let Some(value) = &c.value {
                 self.captured.insert(c.name.clone(), value.clone());
             }
         }
-        let checks = checks::run_checks(&request.checks, &answer, &self.vars());
-        (checks, captures)
+        let mut results = Vec::new();
+        if !request.scripts.after.trim().is_empty() {
+            let out = scripts::after(&request.scripts.after, sent, response, &self.vars());
+            logs.extend(out.logs);
+            for (name, value) in out.vars {
+                self.captured.insert(name.clone(), value.clone());
+                captures.retain(|c| c.name != name);
+                captures.push(Captured { name, value: Some(value), error: None });
+            }
+            results.extend(out.tests.into_iter().map(|t| CheckResult { check: t.name, ok: t.ok, actual: None, error: t.error }));
+            if let Some(e) = out.error {
+                results.push(CheckResult { check: "скрипт после ответа".into(), ok: false, actual: None, error: Some(e) });
+            }
+        }
+        results.extend(checks::run_checks(&request.checks, &answer, &self.vars()));
+        (results, captures)
     }
 }

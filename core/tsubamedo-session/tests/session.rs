@@ -203,3 +203,42 @@ async fn chains_checks_and_collection_runs() {
     assert_eq!(call(&s, "validateCheck", json!({ "text": "$.id == {{id}}" })).await, Value::Null);
     assert!(call(&s, "validateCheck", json!({ "text": "status" })).await.is_string());
 }
+
+#[tokio::test]
+async fn scripts_before_and_after() {
+    let (base, logins) = shop().await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("tsubamedo.toml"), format!("[vars]\nbase = \"{base}\"\n")).unwrap();
+    // The token comes from a script, not from [capture]: it still makes login a producer.
+    std::fs::write(
+        root.join("login.toml"),
+        "method = \"POST\"\nurl = \"{{base}}/login\"\n\n[scripts]\nafter = '''\nconst { token } = response.json();\nvars.set(\"token\", token);\nconsole.log(\"вошли\", token);\n'''\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("orders.toml"),
+        "url = \"{{base}}/orders\"\nchecks = ['$.items count == {{expected}}']\n\n[headers]\nAuthorization = \"Bearer {{token}}\"\nX-Stamp = \"{{stamp}}\"\n\n[scripts]\nbefore = '''\nvars.set(\"stamp\", \"s-\" + vars.get(\"token\"));\nvars.set(\"expected\", 2);\n'''\nafter = '''\ntest(\"два заказа\", () => expect(response.json().items).toHaveLength(2));\ntest(\"штамп ушёл\", () => expect(request.headers.get(\"x-stamp\")).toBe(\"s-t-1\"));\n'''\n",
+    )
+    .unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let s = Session::with_data_dir(data.path().to_path_buf());
+    call(&s, "openCollection", json!({ "path": root })).await;
+    let request = call(&s, "getRequest", json!({ "id": "orders" })).await;
+    assert!(request["scripts"]["before"].as_str().unwrap().contains("vars.set(\"stamp\""));
+
+    let meta = call(&s, "send", json!({ "sendId": "1", "id": "orders", "request": request, "env": null })).await;
+    assert_eq!(meta["before"][0]["id"], json!("login"));
+    let checks: Vec<(String, bool)> = meta["checks"].as_array().unwrap().iter().map(|c| (c["check"].as_str().unwrap().to_string(), c["ok"].as_bool().unwrap())).collect();
+    assert_eq!(checks, [("два заказа".into(), true), ("штамп ушёл".into(), true), ("$.items count == {{expected}}".into(), true)], "{meta}");
+    assert_eq!(logins.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let history = call(&s, "history", json!({ "requestId": "login" })).await;
+    let login = call(&s, "openHistory", json!({ "id": history[0]["id"] })).await;
+    assert_eq!(login["response"]["logs"], json!(["вошли t-1"]));
+
+    // A script that throws before sending stops the request with its line.
+    let mut broken = request.clone();
+    broken["scripts"]["before"] = json!("vars.set('a', 1);\nnope();");
+    let err = s.clone().call("send", json!({ "sendId": "2", "id": "orders", "request": broken, "env": null })).await.unwrap_err();
+    assert!(err.starts_with("скрипт до запроса: ") && err.ends_with("(строка 2)"), "{err}");
+}

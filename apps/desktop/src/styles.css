@@ -310,3 +310,11 @@ button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 .run-row .hist-status { grid-column: auto; }
 .run-row .m { font: 600 10px var(--mono); letter-spacing: .02em; }
 .run-why { grid-column: 3 / -1; white-space: pre-wrap; word-break: break-word; }
+
+/* Scripts: two JavaScript editors one above the other, and their log under the response. */
+.scripts-editor .hint { margin: 2px 0 8px; line-height: 1.6; }
+.scripts-editor .hint code { background: var(--sunken); padding: 0 3px; border-radius: 3px; }
+.editor.code.script { flex: none; height: 190px; min-height: 0; }
+.script-log { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--sunken); white-space: pre-wrap; word-break: break-word; }
+/* Seven request tabs do not fit a narrow editor: they wrap instead of hiding behind a scroll. */
+.request .tabs { flex-wrap: wrap; overflow-x: visible; }

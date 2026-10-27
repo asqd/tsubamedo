@@ -13,6 +13,8 @@ pub enum Error {
     BadUrl { url: String, reason: String },
     #[error("{0}")]
     Invalid(String),
+    #[error("{0}")]
+    Script(String),
     #[error("не удалось найти адрес {host}: {reason}")]
     Dns { host: String, reason: String },
     #[error("не удалось подключиться к {target}: {reason}")]

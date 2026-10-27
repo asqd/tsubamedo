@@ -1,17 +1,20 @@
 // Query parameters, headers and form fields: name, value, on/off. Typing in the empty last row
-// adds a row; switched-off rows stay in the file but are not sent.
+// adds a row; switched-off rows stay in the file but are not sent. Values may hold {{variables}}.
 import { Pair } from "../api";
+import { CodeEditor } from "./CodeEditor";
 
 export function PairsTable({
   rows,
   onChange,
   namePlaceholder = "Имя",
   valuePlaceholder = "Значение",
+  onSubmit,
 }: {
   rows: Pair[];
   onChange: (rows: Pair[]) => void;
   namePlaceholder?: string;
   valuePlaceholder?: string;
+  onSubmit?: () => void;
 }) {
   const all = [...rows, { name: "", value: "", enabled: true }];
   const set = (i: number, patch: Partial<Pair>) => {
@@ -34,7 +37,7 @@ export function PairsTable({
                 <input className="mono" value={row.name} placeholder={namePlaceholder} spellCheck={false} onChange={(e) => set(i, { name: e.target.value })} />
               </td>
               <td>
-                <input className="mono" value={row.value} placeholder={valuePlaceholder} spellCheck={false} onChange={(e) => set(i, { value: e.target.value })} />
+                <CodeEditor mode="line" className="field" value={row.value} placeholder={valuePlaceholder} onSubmit={onSubmit} onChange={(value) => set(i, { value })} />
               </td>
               <td className="del">
                 {!fresh && (

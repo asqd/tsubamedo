@@ -2,6 +2,8 @@
 import { useState } from "react";
 import { Auth, Body, Part, Request } from "../api";
 import { key } from "../platform";
+import { missingVars, useVars } from "../vars";
+import { CodeEditor } from "./CodeEditor";
 import { PairsTable } from "./PairsTable";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
@@ -14,6 +16,8 @@ export function RequestEditor({
   onSend,
   sending,
   saved,
+  onPasteCurl,
+  onCopyCurl,
 }: {
   request: Request;
   onChange: (r: Request) => void;
@@ -21,8 +25,13 @@ export function RequestEditor({
   sending: boolean;
   /** Where the request lives, or null for a scratch request that is not saved. */
   saved: string | null;
+  /** A curl command pasted into the address; true when it was imported. */
+  onPasteCurl: (text: string) => boolean;
+  onCopyCurl: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("query");
+  const vars = useVars();
+  const missing = missingVars(request, vars);
   const set = (patch: Partial<Request>) => onChange({ ...request, ...patch });
   const on = (rows: { enabled: boolean }[]) => rows.filter((r) => r.enabled).length;
   const tabs: [Tab, string, string | number | null][] = [
@@ -35,38 +44,47 @@ export function RequestEditor({
 
   return (
     <div className="request">
-      <input
-        className="req-name"
-        value={request.name ?? ""}
-        placeholder={saved ?? "Черновик — не сохраняется"}
-        spellCheck={false}
-        disabled={!saved}
-        onChange={(e) => set({ name: e.target.value || null })}
-      />
-      <form
-        className="urlbar"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSend();
-        }}
-      >
+      <div className="req-head">
+        <input
+          className="req-name"
+          value={request.name ?? ""}
+          placeholder={saved ?? "Черновик — не сохраняется"}
+          spellCheck={false}
+          disabled={!saved}
+          onChange={(e) => set({ name: e.target.value || null })}
+        />
+        <button className="ghost small" onClick={onCopyCurl} title="Скопировать как команду curl с подставленными переменными">
+          Скопировать как curl
+        </button>
+      </div>
+      <div className="urlbar">
         <select className={`method m-${request.method.toLowerCase()}`} value={request.method} onChange={(e) => set({ method: e.target.value })}>
           {(METHODS.includes(request.method) ? METHODS : [request.method, ...METHODS]).map((m) => (
             <option key={m}>{m}</option>
           ))}
         </select>
-        <input
-          className="url mono"
+        <CodeEditor
+          mode="line"
+          className="url"
           value={request.url}
-          placeholder="https://api.example.com/users или {{base_url}}/users"
-          spellCheck={false}
+          placeholder="Адрес, {{base_url}}/users или вставьте команду curl"
           autoFocus
-          onChange={(e) => set({ url: e.target.value })}
+          onChange={(url) => set({ url })}
+          onSubmit={onSend}
+          onPaste={onPasteCurl}
         />
-        <button className="primary" type="submit" disabled={sending || !request.url.trim()} title={`Отправить (${key("↵")})`}>
+        <button className="primary" disabled={sending || !request.url.trim()} onClick={onSend} title={`Отправить (${key("↵")})`}>
           Отправить
         </button>
-      </form>
+      </div>
+      {missing.length > 0 && (
+        <div className="missing small">
+          Не заданы{vars.length === 0 ? " (откройте коллекцию или выберите окружение)" : ""}:{" "}
+          {missing.map((name) => (
+            <code key={name}>{`{{${name}}}`}</code>
+          ))}
+        </div>
+      )}
       <div className="tabs">
         {tabs.map(([id, label, badge]) => (
           <button key={id} className={tab === id ? "on" : ""} onClick={() => setTab(id)}>
@@ -76,12 +94,12 @@ export function RequestEditor({
         ))}
       </div>
       <div className="tab-body scroll pad">
-        {tab === "query" && <PairsTable rows={request.query} onChange={(query) => set({ query })} />}
+        {tab === "query" && <PairsTable rows={request.query} onChange={(query) => set({ query })} onSubmit={onSend} />}
         {tab === "headers" && (
-          <PairsTable rows={request.headers} onChange={(headers) => set({ headers })} namePlaceholder="Заголовок" />
+          <PairsTable rows={request.headers} onChange={(headers) => set({ headers })} namePlaceholder="Заголовок" onSubmit={onSend} />
         )}
         {tab === "auth" && <AuthEditor auth={request.auth} onChange={(auth) => set({ auth })} />}
-        {tab === "body" && <BodyEditor body={request.body} onChange={(body) => set({ body })} />}
+        {tab === "body" && <BodyEditor body={request.body} onChange={(body) => set({ body })} onSubmit={onSend} />}
         {tab === "options" && (
           <div className="form">
             <label>
@@ -172,12 +190,12 @@ function Field({ label, value, onChange, placeholder }: { label: string; value: 
   return (
     <label>
       <span>{label}</span>
-      <input className="mono" value={value} placeholder={placeholder} spellCheck={false} onChange={(e) => onChange(e.target.value)} />
+      <CodeEditor mode="line" className="field" value={value} placeholder={placeholder} onChange={onChange} />
     </label>
   );
 }
 
-function BodyEditor({ body, onChange }: { body: Body; onChange: (b: Body) => void }) {
+function BodyEditor({ body, onChange, onSubmit }: { body: Body; onChange: (b: Body) => void; onSubmit: () => void }) {
   const [problem, setProblem] = useState<string | null>(null);
   const text = body.type === "json" || body.type === "text" ? body.content : "";
   const switchTo = (type: Body["type"]) => {
@@ -228,28 +246,19 @@ function BodyEditor({ body, onChange }: { body: Body; onChange: (b: Body) => voi
       </div>
       {problem && <div className="hint warn">{problem}</div>}
       {(body.type === "json" || body.type === "text") && (
-        <textarea
-          className="code mono"
+        <CodeEditor
+          mode={body.type}
+          className="code"
           value={body.content}
-          spellCheck={false}
           placeholder={body.type === "json" ? '{"name": "{{name}}"}' : "Текст запроса"}
-          onChange={(e) => onChange({ ...body, content: e.target.value })}
-          onKeyDown={(e) => {
-            // Tab indents instead of leaving the editor.
-            if (e.key !== "Tab") return;
-            e.preventDefault();
-            const el = e.currentTarget;
-            const { selectionStart: s, selectionEnd: end } = el;
-            const next = el.value.slice(0, s) + "  " + el.value.slice(end);
-            onChange({ ...body, content: next });
-            requestAnimationFrame(() => el.setSelectionRange(s + 2, s + 2));
-          }}
+          onChange={(content) => onChange({ ...body, content })}
+          onSubmit={onSubmit}
         />
       )}
       {body.type === "text" && (
         <Field label="Content-Type" value={body.contentType ?? ""} placeholder="text/plain; charset=utf-8" onChange={(v) => onChange({ ...body, contentType: v || null })} />
       )}
-      {body.type === "form" && <PairsTable rows={body.fields} onChange={(fields) => onChange({ ...body, fields })} namePlaceholder="Поле" />}
+      {body.type === "form" && <PairsTable rows={body.fields} onChange={(fields) => onChange({ ...body, fields })} namePlaceholder="Поле" onSubmit={onSubmit} />}
       {body.type === "multipart" && <PartsTable parts={body.parts} onChange={(parts) => onChange({ ...body, parts })} />}
       {body.type === "file" && (
         <div className="form">
@@ -285,7 +294,7 @@ function PartsTable({ parts, onChange }: { parts: Part[]; onChange: (p: Part[]) 
                 </select>
               </td>
               <td>
-                <input className="mono" value={p.value} placeholder={p.isFile ? "путь к файлу" : "Значение"} spellCheck={false} onChange={(e) => set(i, { value: e.target.value })} />
+                <CodeEditor mode="line" className="field" value={p.value} placeholder={p.isFile ? "путь к файлу" : "Значение"} onChange={(value) => set(i, { value })} />
               </td>
               <td className="del">
                 {!fresh && (

@@ -33,6 +33,16 @@ pub struct Collection {
     pub broken: Vec<Error>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct VarSource {
+    pub name: String,
+    pub value: String,
+    /// «коллекция», «окружение stage», «stage, секрет»…
+    pub source: String,
+    /// From a `*.local.toml` file: shown masked.
+    pub secret: bool,
+}
+
 pub struct Entry {
     /// Path from the collection root without `.toml`: `orders/01-create`.
     pub id: String,
@@ -90,8 +100,17 @@ impl Collection {
     }
 
     pub fn vars(&self, env: Option<&str>, overrides: &Vars) -> Result<Vars> {
-        let mut vars = Vars::new();
-        let mut layers = vec![(self.root.join(MANIFEST), true), (self.root.join(LOCAL_MANIFEST), false)];
+        let mut vars: Vars = self.var_sources(env)?.into_iter().map(|v| (v.name, v.value)).collect();
+        vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+        Ok(vars)
+    }
+
+    /// Every variable with the file it finally comes from, for hints in the editor.
+    pub fn var_sources(&self, env: Option<&str>) -> Result<Vec<VarSource>> {
+        let mut layers = vec![
+            (self.root.join(MANIFEST), true, "коллекция".to_string(), false),
+            (self.root.join(LOCAL_MANIFEST), false, "коллекция, секрет".to_string(), true),
+        ];
         if let Some(env) = env {
             let dir = self.root.join(ENV_DIR);
             let file = dir.join(format!("{env}.toml"));
@@ -100,10 +119,11 @@ impl Collection {
                 let hint = if known.is_empty() { "в папке env нет окружений".into() } else { format!("есть: {}", known.join(", ")) };
                 return Err(Error::Invalid(format!("нет окружения «{env}» ({hint})")));
             }
-            layers.push((file, true));
-            layers.push((dir.join(format!("{env}.local.toml")), false));
+            layers.push((file, true, format!("окружение {env}"), false));
+            layers.push((dir.join(format!("{env}.local.toml")), false, format!("{env}, секрет"), true));
         }
-        for (path, required) in layers {
+        let mut out: Vec<VarSource> = Vec::new();
+        for (path, required, source, secret) in layers {
             if !required && !path.is_file() {
                 continue;
             }
@@ -121,11 +141,12 @@ impl Collection {
                     _ => None,
                 });
                 let value = value.ok_or_else(|| Error::Parse { path: path.clone(), message: format!("vars.{key}: нужна строка или число") })?;
-                vars.insert(key.to_string(), value);
+                out.retain(|v| v.name != key);
+                out.push(VarSource { name: key.to_string(), value, source: source.clone(), secret });
             }
         }
-        vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
-        Ok(vars)
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
     }
 
     pub fn find(&self, id: &str) -> Option<&Entry> {
@@ -206,6 +227,11 @@ mod tests {
         let stage = c.vars(Some("stage"), &overrides).unwrap();
         assert_eq!((stage["host"].as_str(), stage["token"].as_str()), ("stage.test", "cli"));
         assert!(c.vars(Some("prod"), &Vars::new()).unwrap_err().to_string().contains("есть: stage"));
+
+        let sources = c.var_sources(Some("stage")).unwrap();
+        let token = sources.iter().find(|v| v.name == "token").unwrap();
+        assert_eq!((token.source.as_str(), token.secret), ("stage, секрет", true));
+        assert_eq!(sources.iter().find(|v| v.name == "host").unwrap().source, "окружение stage");
 
         let nested = root.join("orders");
         assert_eq!(Collection::find_root(&nested).unwrap(), root.canonicalize().unwrap());

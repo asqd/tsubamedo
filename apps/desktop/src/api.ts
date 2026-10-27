@@ -1,6 +1,7 @@
 // Types mirror the serde output of tsubamedo-core and tsubamedo-session (camelCase); every
 // command goes through one `call`, served by the Tauri shell or, in bridge.html, by the bridge.
 import { invoke } from "@tauri-apps/api/core";
+import type { VarInfo } from "./vars";
 
 export interface Pair {
   name: string;
@@ -143,6 +144,9 @@ export const api = {
   send: (sendId: string, id: string | null, request: Request, env: string | null, insecure: boolean) =>
     call<ResponseMeta>("send", { sendId, id, request, env, insecure }),
   cancel: (sendId: string) => call<null>("cancel", { sendId }),
+  vars: (env: string | null) => call<VarInfo[]>("vars", { env }),
+  importCurl: (text: string) => call<Request>("importCurl", { text }),
+  curl: (id: string | null, request: Request, env: string | null) => call<string>("curl", { id, request, env }),
   view: (responseId: number, pretty: boolean) => call<ViewInfo>("view", { responseId, pretty }),
   viewLines: (viewId: number, lines: number[], query: string | null, caseSensitive: boolean) =>
     call<Line[]>("viewLines", { viewId, lines, query, caseSensitive }),

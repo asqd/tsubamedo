@@ -97,6 +97,9 @@ impl Session {
                 }
                 Ok(Value::Null)
             }
+            "vars" => self.vars(args::<EnvArg>(a)?.env),
+            "importCurl" => reply(tsubamedo_core::curl::parse(&args::<TextArg>(a)?.text).map_err(|e| e.to_string())?),
+            "curl" => self.curl(args(a)?),
             "view" => self.view(args(a)?).await,
             "viewLines" => self.view_lines(args(a)?),
             "viewSearch" => self.view_search(args(a)?).await,
@@ -152,17 +155,36 @@ impl Session {
         Ok(json!({ "id": id, "collection": info }))
     }
 
+    fn vars(&self, env: Option<String>) -> Reply {
+        let state = self.state.lock().unwrap();
+        match &state.collection {
+            Some(c) => reply(c.var_sources(env.as_deref()).map_err(|e| e.to_string())?),
+            None => Ok(json!([])),
+        }
+    }
+
+    /// Variables and the folder for relative paths of a request about to be sent.
+    fn context(&self, id: Option<&str>, env: Option<&str>) -> Result<(Vars, PathBuf), String> {
+        let state = self.state.lock().unwrap();
+        Ok(match &state.collection {
+            Some(c) => {
+                let vars = c.vars(env, &Vars::new()).map_err(|e| e.to_string())?;
+                let dir = id.and_then(|id| c.find(id)).map_or_else(|| c.root.clone(), |e| e.dir().to_path_buf());
+                (vars, dir)
+            }
+            None => (Vars::new(), dirs_home()),
+        })
+    }
+
+    fn curl(&self, a: CurlArg) -> Reply {
+        let (vars, dir) = self.context(a.id.as_deref(), a.env.as_deref())?;
+        let prepared = prepare(&a.request, &vars, &dir).map_err(|e| e.to_string())?;
+        Ok(Value::String(tsubamedo_core::curl::to_curl(&prepared, &a.request.body, &vars)))
+    }
+
     async fn send(self: Arc<Self>, a: SendArg) -> Reply {
         let (prepared, options) = {
-            let state = self.state.lock().unwrap();
-            let (vars, dir) = match &state.collection {
-                Some(c) => {
-                    let vars = c.vars(a.env.as_deref(), &Vars::new()).map_err(|e| e.to_string())?;
-                    let dir = a.id.as_deref().and_then(|id| c.find(id)).map_or_else(|| c.root.clone(), |e| e.dir().to_path_buf());
-                    (vars, dir)
-                }
-                None => (Vars::new(), dirs_home()),
-            };
+            let (vars, dir) = self.context(a.id.as_deref(), a.env.as_deref())?;
             let prepared = prepare(&a.request, &vars, &dir).map_err(|e| e.to_string())?;
             let defaults = SendOptions { verify_tls: !a.insecure, ..SendOptions::default() };
             let options = defaults.for_request(&prepared);
@@ -370,6 +392,23 @@ struct IdArg {
 #[serde(rename_all = "camelCase")]
 struct SendIdArg {
     send_id: String,
+}
+
+#[derive(Deserialize)]
+struct EnvArg {
+    env: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TextArg {
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct CurlArg {
+    id: Option<String>,
+    request: Request,
+    env: Option<String>,
 }
 
 #[derive(Deserialize)]

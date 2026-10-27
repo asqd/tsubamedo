@@ -70,4 +70,11 @@ async fn edit_send_and_view_a_big_json() {
 
     let err = s.clone().call("send", json!({ "sendId": "2", "id": id, "request": request })).await.unwrap_err();
     assert_eq!(err, "не заданы переменные: base");
+
+    let vars = call(&s, "vars", json!({ "env": "local" })).await;
+    assert_eq!(vars, json!([{ "name": "base", "value": base, "source": "окружение local", "secret": false }]));
+    let curl = call(&s, "curl", json!({ "id": id, "request": request, "env": "local" })).await;
+    assert_eq!(curl, json!(format!("curl \\\n  '{base}/tours' \\\n  -H 'Accept: application/json' \\\n  -L")));
+    let imported = call(&s, "importCurl", json!({ "text": curl })).await;
+    assert_eq!(imported["url"], json!(format!("{base}/tours")));
 }

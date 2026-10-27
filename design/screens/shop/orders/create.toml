@@ -1,0 +1,21 @@
+name = "Создать заказ"
+method = "POST"
+url = "{{base}}/orders"
+checks = ['status == 200']
+
+[auth]
+type = "bearer"
+token = "{{token}}"
+
+[body]
+type = "json"
+content = '''
+{
+  "items": [{"id": 1, "qty": 2}, {"id": 3, "qty": 1}],
+  "delivery": "курьер",
+  "request_id": "{{$uuid}}"
+}
+'''
+
+[capture]
+order_id = '$.requestId'

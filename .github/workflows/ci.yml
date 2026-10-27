@@ -1,0 +1,65 @@
+name: CI
+
+# What `make check` does, on macOS and Linux: Rust tests, clippy, the interface's type check.
+# Windows builds the CLI and the core, so a Unix-only line is caught before a release.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Проверка (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: One version for every build
+        run: scripts/version.sh
+      - name: WebKitGTK for the app
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libxdo-dev
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: apps/desktop/.nvmrc
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # The app's crate embeds the built interface, so it is built before Rust looks at it.
+      - name: Interface
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run build
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+
+  windows:
+    name: Сборка (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p tsubamedo-cli -p tsubamedo-session

@@ -2,3 +2,4 @@
 .DS_Store
 # Secrets of collections: tokens and passwords never go to git.
 *.local.toml
+/build

@@ -1,0 +1,105 @@
+name: Release
+
+# The installers and the CLI for every system, each with its SHA-256 (scripts/release.sh):
+# DMGs for Apple Silicon and Intel, an NSIS installer for Windows x64, AppImages and .deb
+# packages for Linux x86_64 and ARM64. No signing certificates: see docs/RELEASE.md.
+#
+# A tag v<version> puts them on a draft release of that tag, published by hand. A change to the
+# packaging builds them all, to see that they still build; so does running the workflow by hand.
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["**"]
+    paths:
+      - .github/workflows/release.yml
+      - apps/desktop/src-tauri/tauri.conf.json
+      - scripts/release.sh
+      - scripts/version.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon и Intel)
+            os: macos-latest
+            rust: aarch64-apple-darwin,x86_64-apple-darwin
+          - name: Windows x64
+            os: windows-latest
+            rust: x86_64-pc-windows-msvc
+          # The oldest Ubuntu runner: the binaries run on systems with its glibc and newer.
+          - name: Linux x86_64
+            os: ubuntu-22.04
+            rust: x86_64-unknown-linux-gnu
+          - name: Linux ARM64
+            os: ubuntu-22.04-arm
+            rust: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tag is the version of every build
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: test "v$(scripts/version.sh)" = "$GITHUB_REF_NAME"
+      - name: WebKitGTK and AppImage tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libxdo-dev patchelf file
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: apps/desktop/.nvmrc
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+      - name: Installers and the CLI
+        shell: bash
+        env:
+          # linuxdeploy is an AppImage itself; runners have no FUSE to mount it.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: scripts/release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}
+          path: build/release/*
+          if-no-files-found: error
+
+  publish:
+    name: Черновик выпуска
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: files
+          merge-multiple: true
+      - name: Upload to the release of the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --draft --title "TsubameDo ${GITHUB_REF_NAME#v}" --notes "Что нового — в README; как открыть без подписи — на странице загрузки."
+          gh release upload "$GITHUB_REF_NAME" files/* --clobber

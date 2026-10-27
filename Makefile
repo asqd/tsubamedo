@@ -1,7 +1,7 @@
 DESKTOP := apps/desktop
 APP := target/release/bundle/macos/TsubameDo.app
 
-.PHONY: test lint check cli install deps dev bridge app run icon
+.PHONY: test lint check cli install deps dev bridge app run icon release screens
 
 # Rust tests: request files, variables, sending against local servers, the viewer, the session.
 test:
@@ -39,6 +39,15 @@ app: deps
 
 run: app
 	open $(APP)
+
+# What a release gives for this system, with SHA-256, into build/release: on a Mac the DMGs and
+# the CLI for Apple Silicon and Intel. See docs/RELEASE.md.
+release: deps
+	./scripts/release.sh
+
+# Screenshots for the download page (site/assets/shots), light and dark; needs `make bridge`.
+screens:
+	./design/screens/make.sh
 
 # Redraws the icon from design/make-icon.swift and regenerates the app's icon set.
 icon: deps

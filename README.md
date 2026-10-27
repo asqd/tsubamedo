@@ -13,6 +13,15 @@ HTTP-клиент для работы с API, как Insomnia, но:
 поиском — 28 млн строк листаются сразу.
 План и замеры — в [docs/PLAN.md](docs/PLAN.md).
 
+## Установка
+
+Скачайте со [страницы выпуска](https://github.com/asqd/tsubamedo/releases/latest): DMG для Mac с
+Apple Silicon или Intel (9 МБ), установщик для Windows, AppImage или .deb для Linux, архив CLI.
+Сборки не подписаны сертификатами Apple и Microsoft, поэтому система при первом запуске
+переспросит. На macOS 15: «Готово», затем «Системные настройки» → «Конфиденциальность и
+безопасность» → «Всё равно открыть». На macOS 12–14: правой кнопкой → «Открыть». Подробно — на
+странице загрузки (`site/`) и в [docs/RELEASE.md](docs/RELEASE.md).
+
 ## Сборка
 
 Нужен Rust 1.95 или новее.
@@ -28,6 +37,8 @@ make bridge    # интерфейс в браузере на настоящем 
 make cli       # target/release/tsubamedo
 make install   # tsubamedo в ~/.cargo/bin
 make icon      # перерисовать иконку из design/make-icon.swift
+make release   # DMG и CLI для Apple Silicon и Intel в build/release, с SHA-256
+make screens   # снимки для страницы загрузки (при запущенном make bridge)
 ```
 
 ## Устройство

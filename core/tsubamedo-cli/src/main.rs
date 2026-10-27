@@ -1,0 +1,448 @@
+//! `tsubamedo`: requests and collections from the terminal and CI.
+
+mod format;
+
+use std::io::{self, IsTerminal, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::time::{Duration, Instant};
+
+use clap::{Args, Parser, Subcommand};
+use tsubamedo_core::collection::{Collection, MANIFEST};
+use tsubamedo_core::http::{Response, SendOptions, send};
+use tsubamedo_core::prepare::prepare;
+use tsubamedo_core::request_file::RequestFile;
+use tsubamedo_core::{Body, Error, Pair, Request, Vars};
+
+use format::{Paint, duration, size};
+
+#[derive(Parser)]
+#[command(name = "tsubamedo", version, about = "TsubameDo: HTTP-запросы и коллекции в терминале")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Отправить один запрос: адрес, файл запроса или его имя в коллекции.
+    Send(SendArgs),
+    /// Отправить все запросы коллекции по порядку.
+    Run(RunArgs),
+    /// Проверить, что файлы читаются и все переменные заданы.
+    Check(CheckArgs),
+    /// Создать коллекцию в папке.
+    Init {
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+    },
+}
+
+#[derive(Args)]
+struct Common {
+    /// Окружение из папки env коллекции.
+    #[arg(short, long)]
+    env: Option<String>,
+    /// Переменная поверх всех остальных: --var token=abc.
+    #[arg(long = "var", value_name = "ИМЯ=ЗНАЧЕНИЕ", value_parser = parse_var)]
+    vars: Vec<(String, String)>,
+    /// Не проверять сертификат сервера (тестовые стенды с самоподписанным).
+    #[arg(short = 'k', long)]
+    insecure: bool,
+    /// Ограничение на весь обмен, в секундах.
+    #[arg(long, value_name = "СЕК")]
+    max_time: Option<f64>,
+}
+
+#[derive(Args)]
+struct SendArgs {
+    target: String,
+    #[command(flatten)]
+    common: Common,
+    #[arg(short = 'X', long)]
+    method: Option<String>,
+    /// Заголовок «Имя: значение».
+    #[arg(short = 'H', long = "header")]
+    headers: Vec<String>,
+    /// Тело как в curl (form-urlencoded); @файл — содержимое файла.
+    #[arg(short, long)]
+    data: Option<String>,
+    /// Тело JSON; @файл — из файла.
+    #[arg(long)]
+    json: Option<String>,
+    /// Показать заголовки ответа.
+    #[arg(short, long)]
+    include: bool,
+    /// Ничего не писать в stderr.
+    #[arg(short, long)]
+    quiet: bool,
+    /// Не переходить по перенаправлениям.
+    #[arg(long)]
+    no_follow: bool,
+    /// Сохранить тело ответа в файл.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+    /// Тело как пришло, без форматирования JSON.
+    #[arg(long)]
+    raw: bool,
+    /// Код выхода 1, если статус ответа 400 и выше.
+    #[arg(short, long)]
+    fail: bool,
+}
+
+#[derive(Args)]
+struct RunArgs {
+    #[arg(default_value = ".")]
+    dir: PathBuf,
+    #[command(flatten)]
+    common: Common,
+    /// Только запросы, в имени или пути которых есть этот текст.
+    #[arg(long)]
+    filter: Option<String>,
+    /// Считать ошибкой статус 400 и выше.
+    #[arg(short, long)]
+    fail: bool,
+    /// Остановиться на первой ошибке.
+    #[arg(long)]
+    bail: bool,
+}
+
+#[derive(Args)]
+struct CheckArgs {
+    #[arg(default_value = ".")]
+    dir: PathBuf,
+    /// Окружение; без него проверяются все.
+    #[arg(short, long)]
+    env: Option<String>,
+}
+
+fn parse_var(text: &str) -> Result<(String, String), String> {
+    let (name, value) = text.split_once('=').ok_or("нужно ИМЯ=ЗНАЧЕНИЕ")?;
+    Ok((name.trim().to_string(), value.to_string()))
+}
+
+#[tokio::main]
+async fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let result = match cli.command {
+        Command::Send(args) => send_one(args).await,
+        Command::Run(args) => run(args).await,
+        Command::Check(args) => check(args),
+        Command::Init { dir } => init(&dir),
+    };
+    match result {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("{}", Paint::stderr().red(&format!("ошибка: {e}")));
+            if let Error::Tls { reason, .. } = &e
+                && reason.contains("certificate")
+            {
+                eprintln!("Если это тестовый стенд с самоподписанным сертификатом, добавьте -k.");
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn send_options(common: &Common) -> SendOptions {
+    SendOptions {
+        verify_tls: !common.insecure,
+        timeout: common.max_time.map(Duration::from_secs_f64),
+        ..SendOptions::default()
+    }
+}
+
+fn overrides(common: &Common) -> Vars {
+    common.vars.iter().cloned().collect()
+}
+
+/// What `send` was pointed at: the request, the folder for its relative paths, and variables.
+fn resolve_target(args: &SendArgs) -> tsubamedo_core::Result<(Request, PathBuf, Vars)> {
+    let target = Path::new(&args.target);
+    let cwd = std::env::current_dir().map_err(|e| Error::io(".", e))?;
+    let from_file = target.is_file() && target.extension().is_some_and(|e| e == "toml");
+    let root = Collection::find_root(if from_file { target } else { &cwd });
+    let collection = root.map(Collection::open).transpose()?;
+    let vars = match &collection {
+        Some(c) => c.vars(args.common.env.as_deref(), &overrides(&args.common))?,
+        None if args.common.env.is_some() => {
+            return Err(Error::Invalid(format!("окружение задано, но {MANIFEST} не найден ни здесь, ни выше")));
+        }
+        None => overrides(&args.common),
+    };
+    if from_file {
+        let request = RequestFile::open(target)?.request()?;
+        let dir = target.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
+        return Ok((request, dir, vars));
+    }
+    if let Some(entry) = collection.as_ref().and_then(|c| c.find(args.target.trim_end_matches(".toml"))) {
+        return Ok((entry.request.clone(), entry.dir().to_path_buf(), vars));
+    }
+    Ok((Request { url: args.target.clone(), ..Request::default() }, cwd, vars))
+}
+
+fn data_arg(value: &str) -> io::Result<String> {
+    match value.strip_prefix('@') {
+        Some("-") => {
+            let mut text = String::new();
+            io::stdin().read_to_string(&mut text)?;
+            Ok(text)
+        }
+        Some(path) => std::fs::read_to_string(path),
+        None => Ok(value.to_string()),
+    }
+}
+
+async fn send_one(args: SendArgs) -> tsubamedo_core::Result<ExitCode> {
+    let (mut request, dir, vars) = resolve_target(&args)?;
+    for header in &args.headers {
+        let (name, value) = header
+            .split_once(':')
+            .ok_or_else(|| Error::Invalid(format!("заголовок «{header}»: нужно «Имя: значение»")))?;
+        request.headers.retain(|p| !p.name.eq_ignore_ascii_case(name.trim()));
+        request.headers.push(Pair::new(name.trim(), value.trim()));
+    }
+    if let Some(json) = &args.json {
+        request.body = Body::Json { content: data_arg(json).map_err(|e| Error::io(json, e))? };
+    } else if let Some(data) = &args.data {
+        let content_type = Some("application/x-www-form-urlencoded".to_string());
+        request.body = Body::Text { content: data_arg(data).map_err(|e| Error::io(data, e))?, content_type };
+    }
+    if let Some(method) = &args.method {
+        request.method = method.clone();
+    } else if request.method == "GET" && (args.json.is_some() || args.data.is_some()) {
+        request.method = "POST".into();
+    }
+    if args.no_follow {
+        request.options.follow_redirects = Some(false);
+    }
+
+    let prepared = prepare(&request, &vars, &dir)?;
+    let options = send_options(&args.common).for_request(&prepared);
+    let response = send(&prepared, &options).await?;
+
+    if !args.quiet {
+        print_head(&response, args.include);
+    }
+    write_body(&response, &args)?;
+    Ok(if args.fail && response.status >= 400 { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+}
+
+fn print_head(r: &Response, include: bool) {
+    let paint = Paint::stderr();
+    let mut err = io::stderr().lock();
+    for hop in &r.redirects {
+        let _ = writeln!(err, "{}", paint.dim(&format!("→ {} {}", hop.status, hop.url)));
+    }
+    let status = format!("{} {} {}", r.version, r.status, r.reason);
+    let _ = writeln!(err, "{}", paint.status(r.status, &status));
+    if include {
+        for (name, value) in &r.headers {
+            let _ = writeln!(err, "{}: {value}", paint.bold(name));
+        }
+    }
+    let t = &r.timings;
+    let mut parts = vec![format!("DNS {}", duration(t.dns)), format!("подключение {}", duration(t.connect))];
+    if let Some(tls) = t.tls {
+        parts.push(format!("TLS {}", duration(tls)));
+    }
+    parts.push(format!("ожидание {}", duration(t.wait)));
+    parts.push(format!("загрузка {}", duration(t.download)));
+    parts.push(format!("всего {}", duration(t.total)));
+    let mut body = size(r.body.len());
+    if r.wire_size != r.body.len() {
+        body.push_str(&format!(" (по сети {})", size(r.wire_size)));
+    }
+    parts.push(body);
+    let _ = writeln!(err, "{}", paint.dim(&parts.join(" · ")));
+}
+
+/// Pretty JSON for people, the bytes as they came for pipes and files.
+fn write_body(r: &Response, args: &SendArgs) -> tsubamedo_core::Result<()> {
+    if let Some(path) = &args.output {
+        let mut file = std::fs::File::create(path).map_err(|e| Error::io(path, e))?;
+        io::copy(&mut r.body.reader().map_err(|e| Error::io(path, e))?, &mut file).map_err(|e| Error::io(path, e))?;
+        if !args.quiet {
+            eprintln!("Сохранено: {} ({})", path.display(), size(r.body.len()));
+        }
+        return Ok(());
+    }
+    let stdout = io::stdout();
+    let terminal = stdout.is_terminal();
+    let io_err = |e: io::Error| Error::io("stdout", e);
+    if terminal {
+        const SHOW_LIMIT: u64 = 20 << 20;
+        let head = r.body.head(8 << 10).map_err(io_err)?;
+        if head.contains(&0) {
+            eprintln!("Двоичный ответ, {}: сохраните его через -o файл.", size(r.body.len()));
+            return Ok(());
+        }
+        if r.body.len() > SHOW_LIMIT {
+            eprintln!("Ответ {}: сохраните его через -o файл или направьте в другую программу.", size(r.body.len()));
+            return Ok(());
+        }
+        let mut text = Vec::new();
+        r.body.reader().map_err(io_err)?.read_to_end(&mut text).map_err(io_err)?;
+        let mut out = stdout.lock();
+        if r.is_json() && !args.raw
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&text)
+        {
+            let _ = serde_json::to_writer_pretty(&mut out, &value);
+            let _ = writeln!(out);
+            return Ok(());
+        }
+        let _ = out.write_all(&text);
+        if !text.is_empty() && !text.ends_with(b"\n") {
+            let _ = writeln!(out);
+        }
+        return Ok(());
+    }
+    let copied = io::copy(&mut r.body.reader().map_err(io_err)?, &mut stdout.lock());
+    match copied {
+        // The reader on the other end of the pipe left (`| head`): not our error.
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {}
+        other => {
+            other.map_err(io_err)?;
+        }
+    }
+    Ok(())
+}
+
+async fn run(args: RunArgs) -> tsubamedo_core::Result<ExitCode> {
+    let collection = Collection::open(&args.dir)?;
+    let vars = collection.vars(args.common.env.as_deref(), &overrides(&args.common))?;
+    let options = send_options(&args.common);
+    let paint = Paint::stdout();
+    let started = Instant::now();
+    let (mut passed, mut failed) = (0, 0);
+
+    for broken in &collection.broken {
+        println!("{} {broken}", paint.red("✗"));
+        failed += 1;
+    }
+    let filter = args.filter.as_deref().map(str::to_lowercase);
+    for entry in &collection.requests {
+        if let Some(f) = &filter
+            && !entry.id.to_lowercase().contains(f)
+            && !entry.display_name().to_lowercase().contains(f)
+        {
+            continue;
+        }
+        let title = match &entry.request.name {
+            Some(name) => format!("{}  {}", entry.id, paint.dim(name)),
+            None => entry.id.clone(),
+        };
+        let result = match prepare(&entry.request, &vars, entry.dir()) {
+            Ok(prepared) => send(&prepared, &options.for_request(&prepared)).await,
+            Err(e) => Err(e),
+        };
+        let ok = match &result {
+            Ok(r) => {
+                let ok = !(args.fail && r.status >= 400);
+                let mark = if ok { paint.green("✓") } else { paint.red("✗") };
+                println!(
+                    "{mark} {}  {:>8}  {:>9}  {} {title}",
+                    paint.status(r.status, &r.status.to_string()),
+                    duration(r.timings.total),
+                    size(r.body.len()),
+                    entry.request.method,
+                );
+                ok
+            }
+            Err(e) => {
+                println!("{} {title}\n    {}", paint.red("✗"), paint.red(&e.to_string()));
+                false
+            }
+        };
+        if ok {
+            passed += 1;
+        } else {
+            failed += 1;
+            if args.bail {
+                break;
+            }
+        }
+    }
+    let summary = format!("Успешно: {passed}, с ошибкой: {failed}, за {}", duration(started.elapsed()));
+    println!("\n{}", if failed == 0 { paint.green(&summary) } else { paint.red(&summary) });
+    Ok(if failed == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE })
+}
+
+fn check(args: CheckArgs) -> tsubamedo_core::Result<ExitCode> {
+    let collection = Collection::open(&args.dir)?;
+    let paint = Paint::stdout();
+    let mut problems = 0;
+    for broken in &collection.broken {
+        println!("{} {broken}", paint.red("✗"));
+        problems += 1;
+    }
+    let envs: Vec<Option<String>> = match args.env {
+        Some(env) => vec![Some(env)],
+        None if collection.environments().is_empty() => vec![None],
+        None => collection.environments().into_iter().map(Some).collect(),
+    };
+    for env in &envs {
+        let label = env.as_deref().unwrap_or("без окружения");
+        let vars = match collection.vars(env.as_deref(), &Vars::new()) {
+            Ok(vars) => vars,
+            Err(e) => {
+                println!("{} {label}: {e}", paint.red("✗"));
+                problems += 1;
+                continue;
+            }
+        };
+        for entry in &collection.requests {
+            if let Err(e) = prepare(&entry.request, &vars, entry.dir()) {
+                println!("{} {label}: {}: {e}", paint.red("✗"), entry.id);
+                problems += 1;
+            }
+        }
+    }
+    let labels: Vec<&str> = envs.iter().map(|e| e.as_deref().unwrap_or("без окружения")).collect();
+    if problems == 0 {
+        println!("{}", paint.green(&format!("Запросов: {}, все готовы ({})", collection.requests.len(), labels.join(", "))));
+        Ok(ExitCode::SUCCESS)
+    } else {
+        println!("\n{}", paint.red(&format!("Проблем: {problems}")));
+        Ok(ExitCode::FAILURE)
+    }
+}
+
+fn init(dir: &Path) -> tsubamedo_core::Result<ExitCode> {
+    let manifest = dir.join(MANIFEST);
+    if manifest.exists() {
+        return Err(Error::Invalid(format!("{} уже есть", manifest.display())));
+    }
+    let name = std::path::absolute(dir)
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "Коллекция".into());
+    let files = [
+        (MANIFEST.to_string(), format!("name = {name:?}\n\n# Переменные для всех окружений.\n[vars]\nbase_url = \"https://httpbin.org\"\n")),
+        ("env/dev.toml".into(), "[vars]\nbase_url = \"https://httpbin.org\"\n".into()),
+        (
+            "env/dev.local.toml".into(),
+            "# Секреты окружения: этот файл не попадает в git.\n[vars]\ntoken = \"замените-меня\"\n".into(),
+        ),
+        (".gitignore".into(), "*.local.toml\n".into()),
+    ];
+    for (rel, text) in files {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
+        }
+        if !path.exists() {
+            std::fs::write(&path, text).map_err(|e| Error::io(&path, e))?;
+        }
+    }
+    let example = Request {
+        name: Some("Пример".into()),
+        url: "{{base_url}}/anything".into(),
+        query: vec![Pair::new("from", "tsubamedo")],
+        headers: vec![Pair::new("Accept", "application/json"), Pair::new("Authorization", "Bearer {{token}}")],
+        ..Request::default()
+    };
+    RequestFile::create(dir.join("example.toml"), &example).save()?;
+    println!("Коллекция создана в {}. Попробуйте: tsubamedo run {} -e dev", dir.display(), dir.display());
+    Ok(ExitCode::SUCCESS)
+}

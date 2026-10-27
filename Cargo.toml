@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = [
+    "core/tsubamedo-core",
+    "core/tsubamedo-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+
+[workspace.dependencies]
+tsubamedo-core = { path = "core/tsubamedo-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", default-features = false }
+
+# Debug builds keep full debug info only for our own crates.
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+debug = false
+lto = "thin"
+strip = "debuginfo"

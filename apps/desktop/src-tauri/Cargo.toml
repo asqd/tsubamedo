@@ -13,6 +13,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+tsubamedo-core.workspace = true
 tsubamedo-session.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = [] }

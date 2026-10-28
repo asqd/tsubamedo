@@ -1,5 +1,6 @@
 //! TsubameDo core: everything the app and the CLI do with requests.
 //!
+//! - [`lang`] — Russian or English: every message is written in both (`tr!`).
 //! - [`model`] — a request as the user edits it, with `{{variables}}` still in place.
 //! - [`request_file`] — one request per TOML file; saving rewrites only what changed.
 //! - [`curl`] — `curl …` commands in and out.
@@ -21,6 +22,8 @@
 //! - [`scripts`] — JavaScript before and after a request, on QuickJS.
 //! - [`import`] — collections of Insomnia and Postman, OpenAPI and HAR.
 
+#[macro_use]
+pub mod lang;
 pub mod checks;
 pub mod codegen;
 pub mod collection;

@@ -50,6 +50,13 @@ pub struct Session {
 struct Settings {
     #[serde(default)]
     proxy: ProxyConfig,
+    /// `auto` (the system's), `ru` or `en`; the window resolves `auto` and says which it took.
+    #[serde(default = "auto")]
+    language: String,
+}
+
+fn auto() -> String {
+    "auto".into()
 }
 
 #[derive(Default)]
@@ -299,11 +306,24 @@ impl Session {
                 {
                     Proxy::parse(url)?;
                 }
-                let mut settings = self.settings.lock().unwrap();
-                settings.proxy = a.proxy;
-                if let Some(data) = &self.data_dir {
-                    std::fs::create_dir_all(data).map_err(|e| e.to_string())?;
-                    std::fs::write(data.join("settings.json"), serde_json::to_vec_pretty(&*settings).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+                self.settings.lock().unwrap().proxy = a.proxy;
+                self.save_settings()?;
+                Ok(Value::Null)
+            }
+            // The window's language: what is chosen, and what the core speaks from now on.
+            "language" => {
+                let chosen = self.settings.lock().unwrap().language.clone();
+                Ok(json!({ "language": if chosen.is_empty() { "auto".to_string() } else { chosen } }))
+            }
+            "setLanguage" => {
+                let a: LanguageArg = args(a)?;
+                tsubamedo_core::lang::set_english(a.speak == "en");
+                if let Some(chosen) = a.chosen {
+                    if !["auto", "ru", "en"].contains(&chosen.as_str()) {
+                        return Err(format!("unknown language «{chosen}»"));
+                    }
+                    self.settings.lock().unwrap().language = chosen;
+                    self.save_settings()?;
                 }
                 Ok(Value::Null)
             }
@@ -390,6 +410,13 @@ impl Session {
             }
             other => Err(format!("неизвестная команда {other}")),
         }
+    }
+
+    fn save_settings(&self) -> Result<(), String> {
+        let Some(data) = &self.data_dir else { return Ok(()) };
+        let settings = self.settings.lock().unwrap().clone();
+        std::fs::create_dir_all(data).map_err(|e| e.to_string())?;
+        std::fs::write(data.join("settings.json"), serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
     }
 
     fn collection_root(&self) -> Result<PathBuf, String> {
@@ -1113,6 +1140,14 @@ fn collection_info(c: &Collection) -> CollectionInfo {
 #[derive(Deserialize)]
 struct PathArg {
     path: String,
+}
+
+#[derive(Deserialize)]
+struct LanguageArg {
+    /// `ru` or `en`: what the core says from now on.
+    speak: String,
+    /// The choice to keep, when the user made one: `auto`, `ru` or `en`.
+    chosen: Option<String>,
 }
 
 #[derive(Deserialize)]

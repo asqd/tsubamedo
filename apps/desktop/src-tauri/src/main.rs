@@ -7,11 +7,20 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use tauri::{Manager, State};
+use tsubamedo_core::tr_static;
 use tsubamedo_session::Session;
 
 #[tauri::command]
-async fn call(session: State<'_, Arc<Session>>, method: String, args: Value) -> Result<Value, String> {
-    session.inner().clone().call(&method, args).await
+async fn call(app: tauri::AppHandle, session: State<'_, Arc<Session>>, method: String, args: Value) -> Result<Value, String> {
+    let reply = session.inner().clone().call(&method, args).await;
+    // The menu speaks the window's language: it is told at every start and on every change.
+    #[cfg(target_os = "macos")]
+    if method == "setLanguage" && reply.is_ok() {
+        app.set_menu(menu(&app).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+    reply
 }
 
 /// The macOS menu without "Close Window": ⌘W closes a tab in the window, not the window.
@@ -27,34 +36,34 @@ fn menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::me
                 "TsubameDo",
                 true,
                 &[
-                    &Item::about(app, Some("О TsubameDo"), None)?,
+                    &Item::about(app, Some(tr_static!("О TsubameDo", "About TsubameDo")), None)?,
                     &Item::separator(app)?,
-                    &Item::hide(app, Some("Скрыть TsubameDo"))?,
-                    &Item::hide_others(app, Some("Скрыть остальные"))?,
-                    &Item::show_all(app, Some("Показать все"))?,
+                    &Item::hide(app, Some(tr_static!("Скрыть TsubameDo", "Hide TsubameDo")))?,
+                    &Item::hide_others(app, Some(tr_static!("Скрыть остальные", "Hide Others")))?,
+                    &Item::show_all(app, Some(tr_static!("Показать все", "Show All")))?,
                     &Item::separator(app)?,
-                    &Item::quit(app, Some("Завершить TsubameDo"))?,
+                    &Item::quit(app, Some(tr_static!("Завершить TsubameDo", "Quit TsubameDo")))?,
                 ],
             )?,
             &Submenu::with_items(
                 app,
-                "Правка",
+                tr_static!("Правка", "Edit"),
                 true,
                 &[
-                    &Item::undo(app, Some("Отменить"))?,
-                    &Item::redo(app, Some("Повторить"))?,
+                    &Item::undo(app, Some(tr_static!("Отменить", "Undo")))?,
+                    &Item::redo(app, Some(tr_static!("Повторить", "Redo")))?,
                     &Item::separator(app)?,
-                    &Item::cut(app, Some("Вырезать"))?,
-                    &Item::copy(app, Some("Скопировать"))?,
-                    &Item::paste(app, Some("Вставить"))?,
-                    &Item::select_all(app, Some("Выбрать все"))?,
+                    &Item::cut(app, Some(tr_static!("Вырезать", "Cut")))?,
+                    &Item::copy(app, Some(tr_static!("Скопировать", "Copy")))?,
+                    &Item::paste(app, Some(tr_static!("Вставить", "Paste")))?,
+                    &Item::select_all(app, Some(tr_static!("Выбрать все", "Select All")))?,
                 ],
             )?,
             &Submenu::with_items(
                 app,
-                "Окно",
+                tr_static!("Окно", "Window"),
                 true,
-                &[&Item::minimize(app, Some("Свернуть"))?, &Item::maximize(app, Some("Изменить масштаб"))?, &Item::fullscreen(app, None)?],
+                &[&Item::minimize(app, Some(tr_static!("Свернуть", "Minimize")))?, &Item::maximize(app, Some(tr_static!("Изменить масштаб", "Zoom")))?, &Item::fullscreen(app, None)?],
             )?,
         ],
     )

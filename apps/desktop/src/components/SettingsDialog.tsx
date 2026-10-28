@@ -1,7 +1,8 @@
-// Settings: the proxy (the app's, for every collection on this machine) and the client
-// certificates of the open collection (in its tsubamedo.toml, chosen by host).
+// Settings: the language and the proxy (the app's, for every collection on this machine) and the
+// client certificates of the open collection (in its tsubamedo.toml, chosen by host).
 import { useEffect, useState } from "react";
 import { api, CertEntry, CertSpec, CollectionInfo, ProxyConfig, SystemProxy } from "../api";
+import { chooseLang, LangChoice, systemLang, t } from "../i18n";
 import { home, pickCertFile } from "../platform";
 
 export function SettingsDialog({ collection, env, onClose }: { collection: CollectionInfo | null; env: string | null; onClose: () => void }) {
@@ -11,8 +12,10 @@ export function SettingsDialog({ collection, env, onClose }: { collection: Colle
   const [status, setStatus] = useState<CertEntry["status"][]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [language, setLanguage] = useState<LangChoice | null>(null);
 
   useEffect(() => {
+    api.language().then((l) => setLanguage(l.language), fail);
     api.proxySettings().then(({ proxy, system }) => {
       setProxy(proxy);
       setSystem(system);
@@ -59,7 +62,24 @@ export function SettingsDialog({ collection, env, onClose }: { collection: Colle
   return (
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal settings-dialog" role="dialog" aria-label="Настройки" onKeyDown={(e) => e.key === "Escape" && onClose()}>
-        <h2>Прокси</h2>
+        <h2>{t("Язык", "Language")}</h2>
+        {language && (
+          <fieldset className="choice">
+            {(
+              [
+                ["auto", t(`Как в системе — ${systemLang() === "ru" ? "русский" : "английский"}`, `As the system — ${systemLang() === "ru" ? "Russian" : "English"}`)],
+                ["ru", "Русский"],
+                ["en", "English"],
+              ] as [LangChoice, string][]
+            ).map(([value, label]) => (
+              <label key={value}>
+                <input type="radio" checked={language === value} disabled={busy} onChange={() => (setBusy(true), chooseLang(value).catch(fail))} />
+                <span>{label}</span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+        <h2 className="section-gap">Прокси</h2>
         <p className="faint small">Для всех коллекций на этом компьютере. Запросы на localhost и 127.0.0.1 всегда идут напрямую.</p>
         {proxy && (
           <fieldset className="choice">

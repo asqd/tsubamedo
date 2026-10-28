@@ -462,6 +462,8 @@ export const api = {
   runProgress: (sendId: string) => call<RunProgress | null>("runProgress", { sendId }),
   compare: (left: CompareSide, right: CompareSide, ignore: string[], allHeaders: boolean) =>
     call<Comparison>("compare", { left, right, ignore, allHeaders }),
+  language: () => call<{ language: "auto" | "ru" | "en" }>("language"),
+  setLanguage: (speak: "ru" | "en", chosen: "auto" | "ru" | "en" | null) => call<null>("setLanguage", { speak, chosen }),
   proxySettings: () => call<{ proxy: ProxyConfig; system: SystemProxy }>("proxySettings"),
   saveProxy: (proxy: ProxyConfig) => call<null>("saveProxy", { proxy }),
   certificates: (env: string | null) => call<CertEntry[]>("certificates", { env }),

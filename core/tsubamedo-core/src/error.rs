@@ -2,41 +2,57 @@ use std::path::PathBuf;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Errors are shown to the user as is, so their text is in Russian.
-#[derive(Debug, thiserror::Error)]
+/// Errors are shown to the user as is, in the language of the process (see [`crate::lang`]).
+#[derive(Debug)]
 pub enum Error {
-    #[error("не заданы переменные: {}", .0.join(", "))]
     UndefinedVars(Vec<String>),
-    #[error("переменная {0} ссылается сама на себя")]
     VarCycle(String),
-    #[error("неверный адрес «{url}»: {reason}")]
     BadUrl { url: String, reason: String },
-    #[error("{0}")]
     Invalid(String),
-    #[error("{0}")]
     Script(String),
-    #[error("OAuth 2.0: {0}")]
     OAuth(String),
-    #[error("не удалось найти адрес {host}: {reason}")]
     Dns { host: String, reason: String },
-    #[error("не удалось подключиться к {target}: {reason}")]
     Connect { target: String, reason: String },
-    #[error("прокси {proxy}: {reason}")]
     Proxy { proxy: String, reason: String },
-    #[error("TLS с {host}: {reason}")]
     Tls { host: String, reason: String },
-    #[error("ответ не пришёл за {0} мс")]
     Timeout(u64),
-    #[error("ошибка HTTP: {0}")]
     Http(String),
-    #[error("больше {0} перенаправлений подряд")]
     TooManyRedirects(u32),
-    #[error("не удалось прочитать тело ответа ({encoding}): {reason}")]
     Body { encoding: String, reason: String },
-    #[error("{}: {source}", .path.display())]
     Io { path: PathBuf, source: std::io::Error },
-    #[error("{}: {message}", .path.display())]
     Parse { path: PathBuf, message: String },
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            Error::UndefinedVars(names) => tr!("не заданы переменные: {}", "variables not set: {}", names.join(", ")),
+            Error::VarCycle(name) => tr!("переменная {name} ссылается сама на себя", "variable {name} refers to itself"),
+            Error::BadUrl { url, reason } => tr!("неверный адрес «{url}»: {reason}", "invalid address \"{url}\": {reason}"),
+            Error::Invalid(text) | Error::Script(text) => text.clone(),
+            Error::OAuth(text) => format!("OAuth 2.0: {text}"),
+            Error::Dns { host, reason } => tr!("не удалось найти адрес {host}: {reason}", "could not resolve {host}: {reason}"),
+            Error::Connect { target, reason } => tr!("не удалось подключиться к {target}: {reason}", "could not connect to {target}: {reason}"),
+            Error::Proxy { proxy, reason } => tr!("прокси {proxy}: {reason}", "proxy {proxy}: {reason}"),
+            Error::Tls { host, reason } => tr!("TLS с {host}: {reason}", "TLS with {host}: {reason}"),
+            Error::Timeout(ms) => tr!("ответ не пришёл за {ms} мс", "no response in {ms} ms"),
+            Error::Http(text) => tr!("ошибка HTTP: {text}", "HTTP error: {text}"),
+            Error::TooManyRedirects(n) => tr!("больше {n} перенаправлений подряд", "more than {n} redirects in a row"),
+            Error::Body { encoding, reason } => tr!("не удалось прочитать тело ответа ({encoding}): {reason}", "could not read the response body ({encoding}): {reason}"),
+            Error::Io { path, source } => format!("{}: {source}", path.display()),
+            Error::Parse { path, message } => format!("{}: {message}", path.display()),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Io { source, .. } => Some(source),
+            _ => None,
+        }
+    }
 }
 
 impl Error {

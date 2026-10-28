@@ -1,7 +1,7 @@
 // The window: collection on the left, tabs of open requests, each with its request and answer.
 // Edits are saved to the request's file as you type; the core rewrites only what changed.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, CollectionInfo, emptyRequest, ImportPreview, Reorganized, Request } from "./api";
+import { api, CollectionInfo, emptyRequest, GitState, ImportPreview, Reorganized, Request } from "./api";
 import { when } from "./format";
 import { CodeDialog } from "./components/CodeDialog";
 import { ComparePanel, CompareState } from "./components/ComparePanel";
@@ -12,6 +12,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { Logo } from "./components/Logo";
 import { RequestEditor } from "./components/RequestEditor";
 import { failedIds, RunPanel, RunSettings, RunState } from "./components/RunPanel";
+import { GitActions } from "./components/GitPanel";
 import { ResponsePane } from "./components/ResponsePane";
 import { Kind, TreeOps } from "./components/RequestTree";
 import { Sidebar } from "./components/Sidebar";
@@ -551,18 +552,90 @@ export default function App() {
     }
   };
 
+  /** The collection as it is on disk now, into the tree, the variables and the open tabs. */
+  const takeReloaded = async (info: CollectionInfo) => {
+    setCollection(info);
+    loadVars();
+    for (const t of tabsRef.current) {
+      if (t.id && info.requests.some((r) => r.id === t.id)) patchTab(t.key, { request: await api.getRequest(t.id) });
+    }
+  };
+
   const reload = async () => {
     await flushSave();
     try {
-      const info = await api.reloadCollection();
-      setCollection(info);
-      loadVars();
-      for (const t of tabsRef.current) {
-        if (t.id && info.requests.some((r) => r.id === t.id)) patchTab(t.key, { request: await api.getRequest(t.id) });
-      }
+      await takeReloaded(await api.reloadCollection());
     } catch (e) {
       setProblem((e as Error).message);
     }
+  };
+
+  // Git: the status follows the collection (every save gives a new one) and the window coming
+  // back, since files change outside the app too.
+  const [git, setGit] = useState<GitState | null>(null);
+  const gitRoot = useRef("");
+  const refreshGit = useCallback(async (fetch = false) => {
+    if (!gitRoot.current) return;
+    const asked = gitRoot.current;
+    try {
+      const status = await (fetch ? api.gitFetch() : api.gitStatus());
+      if (asked === gitRoot.current) setGit(status);
+    } catch (e) {
+      // A look at the server that failed (offline) still leaves the local status.
+      if (fetch) setProblem(`git: ${(e as Error).message}`);
+    }
+  }, []);
+  useEffect(() => {
+    if (gitRoot.current !== root) setGit(null);
+    gitRoot.current = root;
+    refreshGit();
+  }, [collection, root, refreshGit]);
+  useEffect(() => {
+    const onFocus = () => refreshGit();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refreshGit]);
+  const gitAction = async <T,>(f: () => Promise<T>): Promise<T | null> => {
+    await flushSave();
+    try {
+      return await f();
+    } catch (e) {
+      setProblem(`git: ${(e as Error).message}`);
+      refreshGit();
+      return null;
+    }
+  };
+  const said = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+  const gitActions: GitActions = {
+    refresh: refreshGit,
+    commit: async (paths, message) => {
+      const done = await gitAction(() => api.gitCommit(paths, message));
+      if (!done) return false;
+      setGit(done.status);
+      flash({ text: `Закоммичено: ${done.hash}` });
+      return true;
+    },
+    pull: async () => {
+      const done = await gitAction(api.gitPull);
+      if (!done) return;
+      setGit(done.status);
+      await takeReloaded(done.collection);
+      flash({ text: said(done.message) });
+    },
+    push: async () => {
+      const done = await gitAction(api.gitPush);
+      if (!done) return;
+      setGit(done.status);
+      flash({ text: said(done.message) });
+    },
+    init: async () => {
+      const status = await gitAction(api.gitInit);
+      if (status) setGit(status);
+    },
+    ignoreSecrets: async () => {
+      const status = await gitAction(api.gitIgnoreSecrets);
+      if (status) setGit(status);
+    },
   };
 
   useEffect(() => {
@@ -690,6 +763,8 @@ export default function App() {
             renameTarget={renameTarget}
             historyVersion={historyVersion}
             onOpenHistory={openHistory}
+            git={git}
+            gitActions={gitActions}
           />
           <div className="workspace">
             <TabBar tabs={tabs} active={tab.key} onSelect={activate} onClose={closeTab} onNew={newScratch} />

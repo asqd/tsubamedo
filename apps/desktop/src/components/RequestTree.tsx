@@ -1,8 +1,9 @@
 // The collection as a tree of folders and requests, the same as on disk: renaming a request
 // renames its file, dragging it moves the file, deleting sends it to the Trash.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CollectionInfo, RequestItem } from "../api";
+import { ChangeKind, CollectionInfo, RequestItem } from "../api";
 import { ContextMenu, MenuItem } from "./ContextMenu";
+import { KIND } from "./GitPanel";
 
 export type Kind = "request" | "folder";
 
@@ -45,6 +46,7 @@ export function RequestTree({
   onSelect,
   ops,
   renameTarget,
+  marks,
 }: {
   collection: CollectionInfo;
   selected: string | null;
@@ -52,6 +54,8 @@ export function RequestTree({
   onSelect: (id: string) => void;
   ops: TreeOps;
   renameTarget: { kind: Kind; path: string; n: number } | null;
+  /** What changed since the last commit: by request id, and folders with changes inside. */
+  marks: Map<string, ChangeKind>;
 }) {
   const [collapsed, setCollapsed] = useState(() => loadCollapsed(collection.root));
   const [renaming, setRenaming] = useState<{ kind: Kind; path: string } | null>(null);
@@ -225,6 +229,7 @@ export function RequestTree({
             >
               <span className="chev">{open ? "▾" : "▸"}</span>
               {label}
+              {marks.has(row.path) && <span className="gm gm-folder" title="Внутри есть изменения" />}
               <button className="more" title="Действия" onClick={(e) => openMenu(e, row)}>
                 ⋯
               </button>
@@ -243,6 +248,11 @@ export function RequestTree({
           >
             <span className={`m m-${method.toLowerCase()}`}>{method === "DELETE" ? "DEL" : method.slice(0, 4)}</span>
             {label}
+            {marks.has(row.path) && (
+              <span className={`gm gm-${marks.get(row.path)}`} title={`С последнего коммита: ${KIND[marks.get(row.path)!].label}`}>
+                {KIND[marks.get(row.path)!].letter}
+              </span>
+            )}
             <button className="more" title="Действия" onClick={(e) => openMenu(e, row)}>
               ⋯
             </button>

@@ -18,6 +18,7 @@ use tokio::task::AbortHandle;
 use tsubamedo_core::checks::{CheckResult, Captured};
 use tsubamedo_core::collection::{Collection, VarSource};
 use tsubamedo_core::cookies::{Jar, SharedJar};
+use tsubamedo_core::git;
 use tsubamedo_core::oauth::{self, SharedTokens};
 use tsubamedo_core::run::{self, Event, Exchange, RunOptions, Runner};
 use tsubamedo_core::http::proxy::{self, Proxy};
@@ -324,8 +325,74 @@ impl Session {
                 self.save_stores();
                 Ok(Value::Null)
             }
+            "gitStatus" => {
+                let root = self.collection_root()?;
+                blocking(move || git_status(&root)).await
+            }
+            "gitFetch" => {
+                let root = self.collection_root()?;
+                blocking(move || {
+                    if let Some(repo) = git::Repo::open(&root)? {
+                        repo.fetch()?;
+                    }
+                    git_status(&root)
+                })
+                .await
+            }
+            "gitDiff" => {
+                let (root, path) = (self.collection_root()?, args::<PathArg>(a)?.path);
+                blocking(move || reply(repo(&root)?.diff(&path)?)).await
+            }
+            "gitCommit" => {
+                let (root, a) = (self.collection_root()?, args::<CommitArg>(a)?);
+                blocking(move || {
+                    let hash = repo(&root)?.commit(&a.paths, &a.message)?;
+                    Ok(json!({ "hash": hash, "status": git_status(&root)? }))
+                })
+                .await
+            }
+            "gitPull" => {
+                let root = self.collection_root()?;
+                let message = blocking({
+                    let root = root.clone();
+                    move || repo(&root)?.pull()
+                })
+                .await?;
+                // The files may have changed under the window.
+                let collection = self.open_collection(root.to_string_lossy().into_owned())?;
+                let status = blocking(move || git_status(&root)).await?;
+                Ok(json!({ "message": message, "status": status, "collection": collection }))
+            }
+            "gitPush" => {
+                let root = self.collection_root()?;
+                blocking(move || {
+                    let message = repo(&root)?.push()?;
+                    Ok(json!({ "message": message, "status": git_status(&root)? }))
+                })
+                .await
+            }
+            "gitInit" => {
+                let root = self.collection_root()?;
+                blocking(move || {
+                    git::Repo::init(&root)?;
+                    git_status(&root)
+                })
+                .await
+            }
+            "gitIgnoreSecrets" => {
+                let root = self.collection_root()?;
+                blocking(move || {
+                    repo(&root)?.ignore_secrets()?;
+                    git_status(&root)
+                })
+                .await
+            }
             other => Err(format!("неизвестная команда {other}")),
         }
+    }
+
+    fn collection_root(&self) -> Result<PathBuf, String> {
+        Ok(self.state.lock().unwrap().collection()?.root.clone())
     }
 
     fn open_collection(&self, path: String) -> Reply {
@@ -1000,6 +1067,24 @@ fn token_info(t: &oauth::Token) -> Value {
     })
 }
 
+fn repo(root: &Path) -> Result<git::Repo, String> {
+    git::Repo::open(root)?.ok_or_else(|| "коллекция не в git".to_string())
+}
+
+/// `{"git": "missing", "error"}` without git, `{"git": "none"}` outside a repository, else the
+/// status with `"git": "repo"`.
+fn git_status(root: &Path) -> Reply {
+    match git::Repo::open(root) {
+        Err(e) => Ok(json!({ "git": "missing", "error": e })),
+        Ok(None) => Ok(json!({ "git": "none" })),
+        Ok(Some(repo)) => {
+            let mut status = serde_json::to_value(repo.status()?).map_err(|e| e.to_string())?;
+            status["git"] = json!("repo");
+            Ok(status)
+        }
+    }
+}
+
 fn dirs_home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
 }
@@ -1027,6 +1112,12 @@ fn collection_info(c: &Collection) -> CollectionInfo {
 #[derive(Deserialize)]
 struct PathArg {
     path: String,
+}
+
+#[derive(Deserialize)]
+struct CommitArg {
+    paths: Vec<String>,
+    message: String,
 }
 
 #[derive(Deserialize)]

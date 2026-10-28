@@ -4,6 +4,7 @@
 //! - [`request_file`] — one request per TOML file; saving rewrites only what changed.
 //! - [`curl`] — `curl …` commands in and out.
 //! - [`organize`] — renaming, moving and deleting requests and folders (to the Trash).
+//! - [`git`] — what changed in the collection, commit, pull and push, through the system git.
 //! - [`collection`] — a folder of request files, environments and their variables.
 //! - [`cookies`] — what servers set, sent back like a browser does, a jar per environment.
 //! - [`digest`] — Digest authentication, answered after the server's challenge.
@@ -28,6 +29,7 @@ pub mod cookies;
 pub mod curl;
 pub mod digest;
 pub mod error;
+pub mod git;
 pub mod http;
 pub mod import;
 pub mod model;

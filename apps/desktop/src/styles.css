@@ -402,3 +402,36 @@ button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 .import-target label { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; cursor: pointer; }
 .import-target label.off { opacity: .5; cursor: default; }
 .side-empty-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Git: marks in the tree and the changes panel. */
+.gm { flex: none; width: 12px; text-align: center; font: 600 10px var(--mono); }
+.item .gm { margin-left: auto; }
+.item .gm + .more { margin-left: 0; }
+.gm-modified { color: var(--warn); }
+.gm-added { color: var(--ok); }
+.gm-deleted, .gm-conflict { color: var(--bad); }
+.gm-renamed { color: var(--accent); }
+.gm-folder { width: 6px; height: 6px; margin-right: 3px; border-radius: 50%; background: var(--warn); opacity: .6; }
+.git { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; }
+.git-head { display: flex; align-items: center; gap: 6px; padding: 2px 4px 4px 8px; }
+.git-head > .ell { flex: 1; min-width: 0; }
+.git-branch { font-weight: 600; }
+.git-sync { display: flex; gap: 4px; flex: none; }
+.git-sync button { min-width: 30px; padding: 2px 6px; font-variant-numeric: tabular-nums; }
+.git-note { padding: 0 8px; }
+.git-all { display: flex; align-items: center; gap: 6px; padding: 0 8px; }
+.git-list { display: flex; flex-direction: column; }
+.git-row { gap: 6px; }
+.git-row input { margin: 0; flex: none; }
+.git-row .git-name { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; }
+.git-row.secret .git-name { color: var(--muted); }
+.git-message { margin: 2px 8px 0; resize: vertical; min-height: 54px; }
+.git-commit { margin: 0 8px; }
+button.link { padding: 0; border: 0; background: none; color: var(--accent); }
+button.link:hover:not(:disabled) { text-decoration: underline; }
+.diff-dialog { width: min(860px, 100%); }
+.diff { max-height: 60vh; margin: 12px 0 0; padding: 6px 0; overflow: auto; border-radius: 6px; background: var(--sunken); font: 12px/1.55 var(--mono); }
+.diff div { padding: 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff .d-add { background: var(--ok-weak); color: var(--ok); }
+.diff .d-del { background: var(--bad-weak); color: var(--bad); }
+.diff .d-hunk { color: var(--faint); }

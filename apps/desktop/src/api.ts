@@ -197,6 +197,36 @@ export interface CollectionInfo {
   broken: string[];
 }
 
+export type ChangeKind = "modified" | "added" | "deleted" | "renamed" | "conflict";
+
+export interface GitChange {
+  /** From the collection's folder: `orders/list.toml`. */
+  path: string;
+  kind: ChangeKind;
+  /** The old path of a rename. */
+  from: string | null;
+  /** A *.local.toml: never committed from here. */
+  secret: boolean;
+}
+
+/** The collection's git: no git at all, no repository, or what changed. */
+export type GitState =
+  | { git: "missing"; error: string }
+  | { git: "none" }
+  | {
+      git: "repo";
+      branch: string | null;
+      upstream: string | null;
+      ahead: number;
+      behind: number;
+      unborn: boolean;
+      changes: GitChange[];
+      /** Changes elsewhere in the repository. */
+      outside: number;
+      /** An unfinished merge or rebase. */
+      busy: string | null;
+    };
+
 /** Milliseconds. */
 export interface Timings {
   dns: number;
@@ -377,6 +407,14 @@ export async function call<T>(method: string, args: object = {}): Promise<T> {
 export const api = {
   openCollection: (path: string) => call<CollectionInfo>("openCollection", { path }),
   reloadCollection: () => call<CollectionInfo>("reloadCollection"),
+  gitStatus: () => call<GitState>("gitStatus"),
+  gitFetch: () => call<GitState>("gitFetch"),
+  gitDiff: (path: string) => call<string>("gitDiff", { path }),
+  gitCommit: (paths: string[], message: string) => call<{ hash: string; status: GitState }>("gitCommit", { paths, message }),
+  gitPull: () => call<{ message: string; status: GitState; collection: CollectionInfo }>("gitPull"),
+  gitPush: () => call<{ message: string; status: GitState }>("gitPush"),
+  gitInit: () => call<GitState>("gitInit"),
+  gitIgnoreSecrets: () => call<GitState>("gitIgnoreSecrets"),
   getRequest: (id: string) => call<Request>("getRequest", { id }),
   saveRequest: (id: string, request: Request) => call<{ written: boolean }>("saveRequest", { id, request }),
   createRequest: (folder: string, name: string) =>

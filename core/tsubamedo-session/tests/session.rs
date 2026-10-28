@@ -404,3 +404,35 @@ async fn code_in_other_languages() {
     assert_eq!(langs[0], json!({ "id": "curl", "group": "Shell", "name": "curl" }));
     assert!(langs.as_array().unwrap().len() >= 20);
 }
+
+#[tokio::test]
+async fn git_from_nothing_to_a_commit() {
+    let config = tempfile::tempdir().unwrap();
+    let gitconfig = config.path().join("gitconfig");
+    std::fs::write(&gitconfig, "[user]\n\tname = Кот\n\temail = kot@test.ru\n[init]\n\tdefaultBranch = main\n").unwrap();
+    // SAFETY: the only test here that runs git.
+    unsafe {
+        std::env::set_var("GIT_CONFIG_GLOBAL", &gitconfig);
+        std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("tsubamedo.toml"), "name = \"Git\"\n").unwrap();
+    std::fs::write(dir.path().join("ping.toml"), "url = \"http://x.test/ping\"\n").unwrap();
+    let s = Session::new();
+    call(&s, "openCollection", json!({ "path": dir.path() })).await;
+    assert_eq!(call(&s, "gitStatus", json!({})).await, json!({ "git": "none" }));
+
+    let status = call(&s, "gitInit", json!({})).await;
+    assert_eq!((status["git"].as_str(), status["unborn"].as_bool()), (Some("repo"), Some(true)));
+    let paths: Vec<&str> = status["changes"].as_array().unwrap().iter().map(|c| c["path"].as_str().unwrap()).collect();
+    assert_eq!(paths, [".gitignore", "ping.toml", "tsubamedo.toml"]);
+    assert_eq!(status["changes"][1]["kind"], "added");
+    let diff = call(&s, "gitDiff", json!({ "path": "ping.toml" })).await;
+    assert!(diff.as_str().unwrap().contains("+url = \"http://x.test/ping\""));
+
+    let done = call(&s, "gitCommit", json!({ "paths": paths, "message": "коллекция" })).await;
+    assert_eq!(done["hash"].as_str().map(str::len), Some(7));
+    assert_eq!(done["status"]["changes"], json!([]));
+    let e = s.clone().call("gitPull", json!({})).await.unwrap_err();
+    assert_eq!(e, "ветка main ещё не связана с сервером — сначала «Отправить»");
+}

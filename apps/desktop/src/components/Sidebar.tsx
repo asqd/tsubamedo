@@ -1,11 +1,13 @@
-// The left panel: the collection as a tree, or the history of sent requests.
-import { useEffect, useState } from "react";
-import { CollectionInfo } from "../api";
+// The left panel: the collection as a tree, the history of sent requests, or what changed in
+// git.
+import { useEffect, useMemo, useState } from "react";
+import { ChangeKind, CollectionInfo, GitState } from "../api";
 import { home } from "../platform";
+import { GitActions, GitPanel } from "./GitPanel";
 import { HistoryList } from "./HistoryList";
 import { Kind, RequestTree, TreeOps } from "./RequestTree";
 
-type Mode = "requests" | "history";
+type Mode = "requests" | "history" | "changes";
 
 export function Sidebar({
   collection,
@@ -18,6 +20,8 @@ export function Sidebar({
   renameTarget,
   historyVersion,
   onOpenHistory,
+  git,
+  gitActions,
 }: {
   collection: CollectionInfo | null;
   selected: string | null;
@@ -30,6 +34,8 @@ export function Sidebar({
   renameTarget: { kind: Kind; path: string; n: number } | null;
   historyVersion: number;
   onOpenHistory: (entryId: string) => void;
+  git: GitState | null;
+  gitActions: GitActions;
 }) {
   const [mode, setMode] = useState<Mode>("requests");
   // Whatever was just created is renamed in the tree, so the tree must be showing.
@@ -37,6 +43,20 @@ export function Sidebar({
     if (renameTarget) setMode("requests");
   }, [renameTarget]);
   const [filter, setFilter] = useState("");
+  const changes = git?.git === "repo" ? git.changes : [];
+  // What changed, by request id and by folder, for the marks in the tree.
+  const marks = useMemo(() => {
+    const out = new Map<string, ChangeKind>();
+    for (const c of changes) {
+      if (!c.path.endsWith(".toml")) continue;
+      out.set(c.path.slice(0, -5), c.kind);
+      for (let p = c.path; p.includes("/"); ) {
+        p = p.slice(0, p.lastIndexOf("/"));
+        if (!out.has(p)) out.set(p, "modified");
+      }
+    }
+    return out;
+  }, [changes]);
 
   return (
     <aside className="sidebar">
@@ -78,8 +98,19 @@ export function Sidebar({
           <button className={mode === "history" ? "on" : ""} onClick={() => setMode("history")}>
             История
           </button>
+          {collection && (
+            <button className={mode === "changes" ? "on" : ""} onClick={() => setMode("changes")} title="Git: что изменилось, коммит, получить и отправить">
+              Git{changes.length ? ` ${changes.length}` : ""}
+            </button>
+          )}
         </div>
       </div>
+      {mode === "changes" && collection ? (
+        <nav className="tree">
+          <GitPanel collection={collection} git={git} act={gitActions} onOpenRequest={(id) => (setMode("requests"), onSelect(id))} />
+        </nav>
+      ) : (
+        <>
       <input className="filter" placeholder={mode === "requests" ? "Найти запрос" : "Найти в истории"} value={filter} spellCheck={false} onChange={(e) => setFilter(e.target.value)} />
       <nav className="tree">
         {mode === "history" ? (
@@ -91,7 +122,7 @@ export function Sidebar({
               <span className="ell">Черновик</span>
             </button>
             {collection ? (
-              <RequestTree collection={collection} selected={selected} filter={filter} onSelect={onSelect} ops={ops} renameTarget={renameTarget} />
+              <RequestTree collection={collection} selected={selected} filter={filter} onSelect={onSelect} ops={ops} renameTarget={renameTarget} marks={marks} />
             ) : (
               <div className="side-empty small muted">
                 <p>Коллекция — это папка с файлом tsubamedo.toml: запросы лежат в ней обычными файлами и живут в git.</p>
@@ -114,6 +145,8 @@ export function Sidebar({
           </>
         )}
       </nav>
+        </>
+      )}
     </aside>
   );
 }

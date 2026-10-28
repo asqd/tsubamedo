@@ -170,7 +170,7 @@ impl RequestFile {
 // ---- reading ----
 
 pub(crate) fn parse_request(root: &Item) -> Result<Request, String> {
-    let t = root.as_table_like().ok_or("файл запроса должен быть таблицей")?;
+    let t = root.as_table_like().ok_or_else(|| tr!("файл запроса должен быть таблицей", "the request file must be a table"))?;
     Ok(Request {
         name: opt_str(t, "name")?,
         method: opt_str(t, "method")?.unwrap_or_else(|| "GET".into()),
@@ -188,7 +188,7 @@ pub(crate) fn parse_request(root: &Item) -> Result<Request, String> {
 
 fn parse_scripts(item: Option<&Item>) -> Result<Scripts, String> {
     let Some(t) = item.and_then(Item::as_table_like) else {
-        return if item.is_some() { Err("scripts должен быть таблицей".into()) } else { Ok(Scripts::default()) };
+        return if item.is_some() { Err(tr!("scripts должен быть таблицей", "scripts must be a table")) } else { Ok(Scripts::default()) };
     };
     Ok(Scripts {
         before: opt_str(t, "before")?.unwrap_or_default(),
@@ -198,7 +198,7 @@ fn parse_scripts(item: Option<&Item>) -> Result<Scripts, String> {
 
 fn parse_checks(item: Option<&Item>) -> Result<Vec<Check>, String> {
     let Some(item) = item else { return Ok(Vec::new()) };
-    let array = item.as_array().ok_or("checks должен быть списком строк")?;
+    let array = item.as_array().ok_or_else(|| tr!("checks должен быть списком строк", "checks must be a list of strings"))?;
     array.iter().map(parse_check).collect()
 }
 
@@ -206,10 +206,10 @@ fn parse_check(v: &Value) -> Result<Check, String> {
     match v {
         Value::String(s) => Ok(Check::new(s.value().clone())),
         Value::InlineTable(t) => Ok(Check {
-            text: opt_str(t, "check")?.ok_or("checks: у { … } нет check")?,
+            text: opt_str(t, "check")?.ok_or_else(|| tr!("checks: у {{ … }} нет check", "checks: {{ … }} has no check"))?,
             enabled: opt_bool(t, "enabled")?.unwrap_or(true),
         }),
-        _ => Err("checks: нужна строка или { check = \"…\", enabled = false }".to_string()),
+        _ => Err(tr!("checks: нужна строка или {{ check = \"…\", enabled = false }}", "checks: expected a string or {{ check = \"…\", enabled = false }}")),
     }
 }
 
@@ -239,14 +239,14 @@ fn opt_str(t: &dyn TableLike, key: &str) -> Result<Option<String>, String> {
             .as_value()
             .and_then(scalar)
             .map(Some)
-            .ok_or_else(|| format!("{key} должен быть строкой")),
+            .ok_or_else(|| tr!("{key} должен быть строкой", "{key} must be a string")),
     }
 }
 
 fn opt_bool(t: &dyn TableLike, key: &str) -> Result<Option<bool>, String> {
     match t.get(key) {
         None => Ok(None),
-        Some(item) => item.as_bool().map(Some).ok_or_else(|| format!("{key}: нужно true или false")),
+        Some(item) => item.as_bool().map(Some).ok_or_else(|| tr!("{key}: нужно true или false", "{key}: expected true or false")),
     }
 }
 
@@ -255,7 +255,7 @@ fn entries_of(name: &str, item: &Item) -> Result<Vec<Entry>, String> {
         Item::Value(Value::Array(array)) => array.iter().map(|v| entry_of(name, v)).collect(),
         Item::Value(v) => entry_of(name, v).map(|e| vec![e]),
         Item::Table(t) => entry_of_object(name, t).map(|e| vec![e]),
-        _ => Err(format!("{name}: непонятное значение")),
+        _ => Err(tr!("{name}: непонятное значение", "{name}: unexpected value")),
     }
 }
 
@@ -265,7 +265,7 @@ fn entry_of(name: &str, v: &Value) -> Result<Entry, String> {
     }
     match v {
         Value::InlineTable(t) => entry_of_object(name, t),
-        _ => Err(format!("{name}: нужна строка или {{ value = \"…\" }}")),
+        _ => Err(tr!("{name}: нужна строка или {{ value = \"…\" }}", "{name}: expected a string or {{ value = \"…\" }}")),
     }
 }
 
@@ -274,13 +274,13 @@ fn entry_of_object(name: &str, t: &dyn TableLike) -> Result<Entry, String> {
     if let Some(path) = opt_str(t, "file")? {
         return Ok(Entry { value: path, is_file: true, enabled });
     }
-    let value = opt_str(t, "value")?.ok_or_else(|| format!("{name}: нет value"))?;
+    let value = opt_str(t, "value")?.ok_or_else(|| tr!("{name}: нет value", "{name}: no value"))?;
     Ok(Entry { value, is_file: false, enabled })
 }
 
 fn entry_list(item: Option<&Item>, section: &str) -> Result<Vec<(String, Entry)>, String> {
     let Some(item) = item else { return Ok(Vec::new()) };
-    let t = item.as_table_like().ok_or_else(|| format!("{section} должен быть таблицей"))?;
+    let t = item.as_table_like().ok_or_else(|| tr!("{section} должен быть таблицей", "{section} must be a table"))?;
     let mut out = Vec::new();
     for (name, item) in t.iter() {
         for entry in entries_of(name, item).map_err(|e| format!("{section}.{e}"))? {
@@ -295,7 +295,7 @@ fn pairs(item: Option<&Item>, section: &str) -> Result<Vec<Pair>, String> {
         .into_iter()
         .map(|(name, e)| {
             if e.is_file {
-                return Err(format!("{section}.{name}: файл можно отправить только в multipart"));
+                return Err(tr!("{section}.{name}: файл можно отправить только в multipart", "{section}.{name}: a file can only be sent in multipart"));
             }
             Ok(Pair { name, value: e.value, enabled: e.enabled })
         })
@@ -304,7 +304,7 @@ fn pairs(item: Option<&Item>, section: &str) -> Result<Vec<Pair>, String> {
 
 fn parse_auth(item: Option<&Item>) -> Result<Auth, String> {
     let Some(t) = item.and_then(Item::as_table_like) else {
-        return if item.is_some() { Err("auth должен быть таблицей".into()) } else { Ok(Auth::None) };
+        return if item.is_some() { Err(tr!("auth должен быть таблицей", "auth must be a table")) } else { Ok(Auth::None) };
     };
     let field = |key: &str| opt_str(t, key).map(Option::unwrap_or_default);
     Ok(match opt_str(t, "type")?.as_deref() {
@@ -318,7 +318,7 @@ fn parse_auth(item: Option<&Item>) -> Result<Auth, String> {
             location: match opt_str(t, "in")?.as_deref() {
                 None | Some("header") => ApiKeyLocation::Header,
                 Some("query") => ApiKeyLocation::Query,
-                Some(other) => return Err(format!("auth.in: «{other}», нужно header или query")),
+                Some(other) => return Err(tr!("auth.in: «{other}», нужно header или query", "auth.in: \"{other}\", expected header or query")),
             },
         },
         Some("oauth2") => Auth::OAuth2(OAuth2 {
@@ -326,7 +326,7 @@ fn parse_auth(item: Option<&Item>) -> Result<Auth, String> {
                 None | Some("authorization_code") => Grant::AuthorizationCode,
                 Some("client_credentials") => Grant::ClientCredentials,
                 Some("password") => Grant::Password,
-                Some(other) => return Err(format!("auth.grant: «{other}», нужно authorization_code, client_credentials или password")),
+                Some(other) => return Err(tr!("auth.grant: «{other}», нужно authorization_code, client_credentials или password", "auth.grant: \"{other}\", expected authorization_code, client_credentials or password")),
             },
             auth_url: field("auth_url")?,
             token_url: field("token_url")?,
@@ -339,7 +339,7 @@ fn parse_auth(item: Option<&Item>) -> Result<Auth, String> {
             client_auth: match opt_str(t, "client_auth")?.as_deref() {
                 None | Some("basic") => ClientAuth::Basic,
                 Some("body") => ClientAuth::Body,
-                Some(other) => return Err(format!("auth.client_auth: «{other}», нужно basic или body")),
+                Some(other) => return Err(tr!("auth.client_auth: «{other}», нужно basic или body", "auth.client_auth: \"{other}\", expected basic or body")),
             },
             username: field("username")?,
             password: field("password")?,
@@ -351,17 +351,17 @@ fn parse_auth(item: Option<&Item>) -> Result<Auth, String> {
             region: field("region")?,
             service: field("service")?,
         }),
-        Some(other) => return Err(format!("auth.type: неизвестный тип «{other}»")),
+        Some(other) => return Err(tr!("auth.type: неизвестный тип «{other}»", "auth.type: unknown type \"{other}\"")),
     })
 }
 
 fn parse_body(item: Option<&Item>) -> Result<Body, String> {
     let Some(t) = item.and_then(Item::as_table_like) else {
-        return if item.is_some() { Err("body должен быть таблицей".into()) } else { Ok(Body::None) };
+        return if item.is_some() { Err(tr!("body должен быть таблицей", "body must be a table")) } else { Ok(Body::None) };
     };
     let content = || opt_str(t, "content").map(Option::unwrap_or_default);
     Ok(match opt_str(t, "type")?.as_deref() {
-        None => return Err("в body не указан type".into()),
+        None => return Err(tr!("в body не указан type", "body has no type")),
         Some("none") => Body::None,
         Some("json") => Body::Json { content: content()? },
         Some("text") => Body::Text { content: content()?, content_type: opt_str(t, "content_type")? },
@@ -373,10 +373,10 @@ fn parse_body(item: Option<&Item>) -> Result<Body, String> {
                 .collect(),
         },
         Some("file") => Body::File {
-            path: opt_str(t, "path")?.ok_or("body: у type = \"file\" нет path")?,
+            path: opt_str(t, "path")?.ok_or_else(|| tr!("body: у type = \"file\" нет path", "body: type = \"file\" has no path"))?,
             content_type: opt_str(t, "content_type")?,
         },
-        Some(other) => return Err(format!("body.type: неизвестный тип «{other}»")),
+        Some(other) => return Err(tr!("body.type: неизвестный тип «{other}»", "body.type: unknown type \"{other}\"")),
     })
 }
 
@@ -387,7 +387,7 @@ fn parse_options(item: Option<&Item>) -> Result<RequestOptions, String> {
         Some(item) => Some(
             item.as_integer()
                 .and_then(|i| u64::try_from(i).ok())
-                .ok_or("options.timeout_ms: нужно число миллисекунд")?,
+                .ok_or_else(|| tr!("options.timeout_ms: нужно число миллисекунд", "options.timeout_ms: expected a number of milliseconds"))?,
         ),
     };
     Ok(RequestOptions {
@@ -788,6 +788,17 @@ content = '''
         assert_eq!(r.headers, vec![Pair::new("Accept", "application/json"), Pair::new("X-Tag", "a"), Pair::new("X-Tag", "b")]);
         assert_eq!(r.auth, Auth::Bearer { token: "{{token}}".into() });
         assert_eq!(r.body, Body::Json { content: "{\n  \"tour_id\": 42\n}\n".into() });
+    }
+
+    #[test]
+    fn mistakes_are_told_in_english_too() {
+        let parse = |text: &str| parse_request(text.parse::<DocumentMut>().unwrap().as_item()).unwrap_err();
+        assert_eq!(parse("auth = { type = \"x\" }"), "auth.type: неизвестный тип «x»");
+        crate::lang::in_language(true, || {
+            assert_eq!(parse("auth = { type = \"x\" }"), "auth.type: unknown type \"x\"");
+            assert_eq!(parse("checks = [1]"), "checks: expected a string or { check = \"…\", enabled = false }");
+            assert_eq!(parse("[body]\ntype = \"file\""), "body: type = \"file\" has no path");
+        });
     }
 
     #[test]

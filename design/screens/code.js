@@ -1,5 +1,5 @@
-await open("Создать заказ");
-click("Код…");
+await open(L("Создать заказ", "Create order"));
+click(L("Код…", "Code…"));
 await sleep(500);
-pick(document.querySelector(".code-dialog select"), "python-requests");
+await language("requests");
 await sleep(800);

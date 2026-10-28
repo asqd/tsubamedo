@@ -4,7 +4,8 @@
 // hides line ranges, and search runs in the core over the whole view.
 import { ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, Line, ResponseMeta, SearchResult, ViewInfo } from "../api";
-import { count, plural, size } from "../format";
+import { count, noun, size } from "../format";
+import { t } from "../i18n";
 import { mod, pickSavePath } from "../platform";
 
 const ROW = 18;
@@ -327,7 +328,7 @@ export function BodyViewer({ meta }: { meta: ResponseMeta }) {
     try {
       const text = await api.bodyText(meta.responseId, info?.pretty ? info.viewId : null);
       await navigator.clipboard.writeText(text);
-      setFlash("Скопировано");
+      setFlash(t("Скопировано", "Copied"));
     } catch (e) {
       setFlash(String((e as Error).message ?? e));
     }
@@ -340,7 +341,7 @@ export function BodyViewer({ meta }: { meta: ResponseMeta }) {
     if (!path) return;
     try {
       await api.saveBody(meta.responseId, info?.pretty ? info.viewId : null, path);
-      setFlash("Сохранено");
+      setFlash(t("Сохранено", "Saved"));
     } catch (e) {
       setFlash(String((e as Error).message ?? e));
     }
@@ -381,25 +382,25 @@ export function BodyViewer({ meta }: { meta: ResponseMeta }) {
     <div className="viewer">
       <div className="viewer-bar">
         <div className="seg">
-          <button className={pretty ? "on" : ""} onClick={() => setPretty(true)} title="JSON с отступами и сворачиванием">
-            Красиво
+          <button className={pretty ? "on" : ""} onClick={() => setPretty(true)} title={t("JSON с отступами и сворачиванием", "Indented, foldable JSON")}>
+            {t("Красиво", "Pretty")}
           </button>
-          <button className={!pretty ? "on" : ""} onClick={() => setPretty(false)} title="Тело как пришло">
-            Как есть
+          <button className={!pretty ? "on" : ""} onClick={() => setPretty(false)} title={t("Тело как пришло", "The body as it came")}>
+            {t("Как есть", "Raw")}
           </button>
         </div>
         {info?.pretty && (
           <div className="seg">
-            <button onClick={() => foldAll(false)} title="Свернуть объекты верхнего уровня">
-              Свернуть
+            <button onClick={() => foldAll(false)} title={t("Свернуть объекты верхнего уровня", "Collapse top-level objects")}>
+              {t("Свернуть", "Collapse")}
             </button>
-            <button onClick={() => foldAll(true)} title="Развернуть всё">
-              Развернуть
+            <button onClick={() => foldAll(true)} title={t("Развернуть всё", "Expand all")}>
+              {t("Развернуть", "Expand")}
             </button>
           </div>
         )}
         <span className="faint small num ell">
-          {info && `${count(info.lines)} ${plural(info.lines, "строка", "строки", "строк")} · ${size(info.bytes)}`}
+          {info && `${count(info.lines)} ${noun(info.lines, ["строка", "строки", "строк"], ["line", "lines"])} · ${size(info.bytes)}`}
         </span>
       </div>
       <div className="viewer-find">
@@ -407,7 +408,7 @@ export function BodyViewer({ meta }: { meta: ResponseMeta }) {
           <input
             ref={searchInput}
             value={query}
-            placeholder="Поиск в ответе"
+            placeholder={t("Поиск в ответе", "Search the response")}
             spellCheck={false}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -421,26 +422,31 @@ export function BodyViewer({ meta }: { meta: ResponseMeta }) {
               }
             }}
           />
-          <button className={`case ${caseSensitive ? "on" : ""}`} onClick={() => setCaseSensitive(!caseSensitive)} title="Учитывать регистр">
+          <button className={`case ${caseSensitive ? "on" : ""}`} onClick={() => setCaseSensitive(!caseSensitive)} title={t("Учитывать регистр", "Match case")}>
             Aa
           </button>
           <span className="small muted num hits">
             {searching ? <span className="spin" /> : found ? (
-              found.total === 0 ? "нет" : `${current + 1} из ${count(found.lines.length)}${found.lines.length >= 100_000 ? "+" : ""} стр. · ${count(found.total)}${found.capped ? "+" : ""}`
+              found.total === 0
+                ? t("нет", "no matches")
+                : t(
+                    `${current + 1} из ${count(found.lines.length)}${found.lines.length >= 100_000 ? "+" : ""} стр. · ${count(found.total)}${found.capped ? "+" : ""}`,
+                    `${current + 1} of ${count(found.lines.length)}${found.lines.length >= 100_000 ? "+" : ""} ${found.lines.length === 1 ? "line" : "lines"} · ${count(found.total)}${found.capped ? "+" : ""}`,
+                  )
             ) : null}
           </span>
-          <button className="icon" disabled={!found?.lines.length} onClick={() => goTo(current - 1)} title="Предыдущее (⇧↵)">
+          <button className="icon" disabled={!found?.lines.length} onClick={() => goTo(current - 1)} title={t("Предыдущее (⇧↵)", "Previous (⇧↵)")}>
             ↑
           </button>
-          <button className="icon" disabled={!found?.lines.length} onClick={() => goTo(current + 1)} title="Следующее (↵)">
+          <button className="icon" disabled={!found?.lines.length} onClick={() => goTo(current + 1)} title={t("Следующее (↵)", "Next (↵)")}>
             ↓
           </button>
         </div>
-        <button className="ghost" onClick={copy} title="Скопировать тело (до 20 МБ)">
-          Копировать
+        <button className="ghost" onClick={copy} title={t("Скопировать тело (до 20 МБ)", "Copy the body (up to 20 MB)")}>
+          {t("Копировать", "Copy")}
         </button>
-        <button className="ghost" onClick={saveAs} title="Сохранить тело в файл">
-          Сохранить…
+        <button className="ghost" onClick={saveAs} title={t("Сохранить тело в файл", "Save the body to a file")}>
+          {t("Сохранить…", "Save…")}
         </button>
       </div>
       {info?.note && <div className="viewer-note small">{info.note}</div>}
@@ -451,11 +457,11 @@ export function BodyViewer({ meta }: { meta: ResponseMeta }) {
         </span>
         {loading && (
           <div className="viewer-wait muted">
-            <span className="spin" /> {pretty ? `Форматирую ${size(meta.size)}…` : "Открываю…"}
+            <span className="spin" /> {pretty ? t(`Форматирую ${size(meta.size)}…`, `Formatting ${size(meta.size)}…`) : t("Открываю…", "Opening…")}
           </div>
         )}
         {error && <div className="viewer-wait bad-text">{error}</div>}
-        {!loading && info && info.bytes === 0 && <div className="viewer-wait faint">Пустое тело</div>}
+        {!loading && info && info.bytes === 0 && <div className="viewer-wait faint">{t("Пустое тело", "Empty body")}</div>}
         {!loading &&
           info &&
           info.bytes > 0 &&
@@ -477,7 +483,7 @@ export function BodyViewer({ meta }: { meta: ResponseMeta }) {
                     <span className="folded" onClick={() => toggleFold(line)}>
                       … {closer}{" "}
                       <i>
-                        {count(line.foldEnd! - line.n - 1)} {plural(line.foldEnd! - line.n - 1, "строка", "строки", "строк")}
+                        {count(line.foldEnd! - line.n - 1)} {noun(line.foldEnd! - line.n - 1, ["строка", "строки", "строк"], ["line", "lines"])}
                       </i>
                     </span>
                   )}

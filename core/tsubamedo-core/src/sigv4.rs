@@ -19,13 +19,18 @@ const UNSIGNED: &[&str] = &["authorization", "user-agent", "expect", "connection
 /// the body's hash for S3 and `Authorization`.
 pub fn sign(p: &mut Prepared, aws: &AwsV4, now: i64) -> Result<(), String> {
     let missing: Vec<&str> =
-        [("ключ доступа", &aws.access_key), ("секретный ключ", &aws.secret_key), ("регион", &aws.region), ("сервис", &aws.service)]
+        [
+            (tr_static!("ключ доступа", "access key"), &aws.access_key),
+            (tr_static!("секретный ключ", "secret key"), &aws.secret_key),
+            (tr_static!("регион", "region"), &aws.region),
+            (tr_static!("сервис", "service"), &aws.service),
+        ]
             .iter()
             .filter(|(_, v)| v.trim().is_empty())
             .map(|(name, _)| *name)
             .collect();
     if !missing.is_empty() {
-        return Err(format!("AWS Signature v4: не заданы {}", missing.join(", ")));
+        return Err(tr!("AWS Signature v4: не заданы {}", "AWS Signature v4: not set: {}", missing.join(", ")));
     }
     let (region, service) = (aws.region.trim(), aws.service.trim());
     let s3 = service == "s3";
@@ -39,7 +44,7 @@ pub fn sign(p: &mut Prepared, aws: &AwsV4, now: i64) -> Result<(), String> {
         }
     };
     if amz_date.len() < 8 || !amz_date[..8].bytes().all(|b| b.is_ascii_digit()) {
-        return Err(format!("X-Amz-Date «{amz_date}»: нужно ГГГГММДДTЧЧММССZ"));
+        return Err(tr!("X-Amz-Date «{amz_date}»: нужно ГГГГММДДTЧЧММССZ", "X-Amz-Date \"{amz_date}\": must be YYYYMMDDTHHMMSSZ"));
     }
     if !aws.session_token.trim().is_empty() && p.header("x-amz-security-token").is_none() {
         p.headers.push(("X-Amz-Security-Token".into(), aws.session_token.trim().to_string()));
@@ -253,5 +258,7 @@ mod tests {
         assert_eq!(s3.headers.iter().filter(|(n, _)| n == "Authorization").count(), 1);
         let err = sign(&mut prepared("GET", "https://h.test/", &[], ""), &example("", ""), 0).unwrap_err();
         assert_eq!(err, "AWS Signature v4: не заданы регион, сервис");
+        let err = crate::lang::in_language(true, || sign(&mut prepared("GET", "https://h.test/", &[], ""), &example("", ""), 0).unwrap_err());
+        assert_eq!(err, "AWS Signature v4: not set: region, service");
     }
 }

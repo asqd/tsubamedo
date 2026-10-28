@@ -9,6 +9,19 @@
   <meta property="og:title" content="TsubameDo">
   <meta property="og:description" content="Лёгкий клиент для REST API: большие ответы, коллекции в git, без регистрации.">
   <meta property="og:image" content="assets/og.png">
+  <link rel="alternate" hreflang="ru" href="https://asqd.github.io/tsubamedo/">
+  <link rel="alternate" hreflang="en" href="https://asqd.github.io/tsubamedo/en/">
+  <link rel="alternate" hreflang="x-default" href="https://asqd.github.io/tsubamedo/">
+  <script>
+    // A visitor who picked English in the header, or a first visit from a browser whose first
+    // language isn't Russian: the English page. Picking Russian stops this. Without storage, no
+    // redirect: the choice of Russian couldn't be remembered and the visitor would be sent back.
+    try {
+      const chosen = localStorage.getItem("tsubamedo.lang");
+      const lang = (navigator.languages && navigator.languages[0]) || navigator.language || "";
+      if (chosen === "en" || (!chosen && lang && !/^ru\b/i.test(lang))) location.replace("en/" + location.hash);
+    } catch (e) {}
+  </script>
   <link rel="icon" type="image/png" href="assets/favicon-64.png">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
   <link rel="stylesheet" href="style.css">
@@ -28,6 +41,11 @@
       <a href="#cli">CLI</a>
       <a data-repo="" href="https://github.com/asqd/tsubamedo">GitHub</a>
     </nav>
+    <div class="lang">
+      <span aria-current="page" title="Русский">RU</span>
+      <span aria-hidden="true">·</span>
+      <a href="en/" hreflang="en" lang="en" title="English">EN</a>
+    </div>
   </div>
 </header>
 

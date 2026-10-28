@@ -38,7 +38,7 @@ pub fn validate(schema: &Value, dir: Option<&Path>, values: &[(Vec<String>, &Val
     let total = problems.len();
     let mut text = problems.into_iter().take(SHOWN).collect::<Vec<_>>().join("; ");
     if total > SHOWN {
-        text.push_str(&format!("; и ещё {}", total - SHOWN));
+        text.push_str(&tr!("; и ещё {}", "; and {} more", total - SHOWN));
     }
     Ok(Err(text))
 }
@@ -52,16 +52,16 @@ fn compile(schema: &Value, dir: Option<&Path>) -> Result<(Schemas, boon::SchemaI
             // `file.json#/$defs/Order` is a part of the file.
             let (path, fragment) = path.split_once('#').unwrap_or((path, ""));
             let file = find(path, dir)?;
-            let mut url = url::Url::from_file_path(&file).map_err(|_| format!("схема {}: путь не годится", file.display()))?;
+            let mut url = url::Url::from_file_path(&file).map_err(|_| tr!("схема {}: путь не годится", "schema {}: unusable path", file.display()))?;
             url.set_fragment(Some(fragment).filter(|f| !f.is_empty()));
-            (url.to_string(), format!("схема {path}"))
+            (url.to_string(), tr!("схема {path}", "schema {path}"))
         }
         inline => {
             // Relative `$ref` in a schema written in the line resolve from the request's folder.
             let base = dir.and_then(|d| std::path::absolute(d).ok()).unwrap_or_else(std::env::temp_dir);
-            let url = url::Url::from_file_path(base.join("inline-schema.json")).map_err(|_| "схема: путь не годится".to_string())?.to_string();
-            compiler.add_resource(&url, inline.clone()).map_err(|e| broken(&e, "схема"))?;
-            (url, "схема".to_string())
+            let url = url::Url::from_file_path(base.join("inline-schema.json")).map_err(|_| tr!("схема: путь не годится", "schema: unusable path"))?.to_string();
+            compiler.add_resource(&url, inline.clone()).map_err(|e| broken(&e, tr_static!("схема", "schema")))?;
+            (url, tr!("схема", "schema"))
         }
     };
     let index = compiler.compile(&url, &mut schemas).map_err(|e| broken(&e, &label))?;
@@ -72,7 +72,7 @@ fn compile(schema: &Value, dir: Option<&Path>) -> Result<(Schemas, boon::SchemaI
 fn find(path: &str, dir: Option<&Path>) -> Result<PathBuf, String> {
     let rel = Path::new(path);
     if rel.is_absolute() {
-        return if rel.is_file() { Ok(rel.to_path_buf()) } else { Err(format!("нет файла схемы {path}")) };
+        return if rel.is_file() { Ok(rel.to_path_buf()) } else { Err(tr!("нет файла схемы {path}", "no schema file {path}")) };
     }
     let mut at = dir.and_then(|d| std::path::absolute(d).ok());
     while let Some(d) = at {
@@ -85,7 +85,10 @@ fn find(path: &str, dir: Option<&Path>) -> Result<PathBuf, String> {
         }
         at = d.parent().map(Path::to_path_buf);
     }
-    Err(format!("нет файла схемы {path} — искал от папки запроса до корня коллекции"))
+    Err(tr!(
+        "нет файла схемы {path} — искал от папки запроса до корня коллекции",
+        "no schema file {path} — looked from the request's folder up to the collection's root"
+    ))
 }
 
 /// Why a schema could not be used, without the long file URLs the library speaks in.
@@ -95,13 +98,15 @@ fn broken(e: &CompileError, label: &str) -> String {
         CompileError::ValidationError { src, .. } => {
             let mut problems = Vec::new();
             leaves(src, &[], true, &mut problems);
-            format!("{label} неверна: {}", problems.join("; "))
+            tr!("{label} неверна: {}", "{label} is invalid: {}", problems.join("; "))
         }
         CompileError::LoadUrlError { url, src } => {
             let file = url::Url::parse(url).ok().and_then(|u| u.to_file_path().ok()).map(|p| p.display().to_string()).unwrap_or_else(|| url.clone());
-            format!("{label}: не прочитать {file}: {src}")
+            tr!("{label}: не прочитать {file}: {src}", "{label}: cannot read {file}: {src}")
         }
-        CompileError::UnsupportedUrlScheme { url } => format!("{label}: {url} — схемы берутся только из файлов, не из сети"),
+        CompileError::UnsupportedUrlScheme { url } => {
+            tr!("{label}: {url} — схемы берутся только из файлов, не из сети", "{label}: {url} — schemas come only from files, not from the network")
+        }
         other => format!("{label}: {other}"),
     }
 }
@@ -147,11 +152,11 @@ fn kind(t: Type) -> &'static str {
     match t {
         Type::Null => "null",
         Type::Boolean => "true/false",
-        Type::Number => "число",
-        Type::Integer => "целое",
-        Type::String => "строка",
-        Type::Array => "массив",
-        Type::Object => "объект",
+        Type::Number => tr_static!("число", "number"),
+        Type::Integer => tr_static!("целое", "integer"),
+        Type::String => tr_static!("строка", "string"),
+        Type::Array => tr_static!("массив", "array"),
+        Type::Object => tr_static!("объект", "object"),
     }
 }
 
@@ -162,33 +167,36 @@ fn list<T: std::fmt::Display>(items: impl IntoIterator<Item = T>) -> String {
 /// A violation in words.
 fn say(k: &ErrorKind) -> String {
     match k {
-        ErrorKind::Type { got, want } => format!("ожидалось {}, а здесь {}", want.iter().map(kind).collect::<Vec<_>>().join(" или "), kind(*got)),
-        ErrorKind::Required { want } if want.len() == 1 => format!("нет поля {}", want[0]),
-        ErrorKind::Required { want } => format!("нет полей {}", list(want)),
-        ErrorKind::AdditionalProperties { got } => format!("лишние поля: {}", list(got)),
-        ErrorKind::Enum { want } => format!("ожидалось одно из {}", list(want.iter())),
-        ErrorKind::Const { want } => format!("ожидалось {want}"),
-        ErrorKind::Minimum { got, want } => format!("{got} меньше {want}"),
-        ErrorKind::Maximum { got, want } => format!("{got} больше {want}"),
-        ErrorKind::ExclusiveMinimum { got, want } => format!("{got} не больше {want}"),
-        ErrorKind::ExclusiveMaximum { got, want } => format!("{got} не меньше {want}"),
-        ErrorKind::MultipleOf { got, want } => format!("{got} не делится на {want}"),
-        ErrorKind::MinLength { got, want } => format!("длина {got}, а нужно не меньше {want}"),
-        ErrorKind::MaxLength { got, want } => format!("длина {got}, а нужно не больше {want}"),
-        ErrorKind::MinItems { got, want } => format!("элементов {got}, а нужно не меньше {want}"),
-        ErrorKind::MaxItems { got, want } => format!("элементов {got}, а нужно не больше {want}"),
-        ErrorKind::MinProperties { got, want } => format!("полей {got}, а нужно не меньше {want}"),
-        ErrorKind::MaxProperties { got, want } => format!("полей {got}, а нужно не больше {want}"),
-        ErrorKind::UniqueItems { got: [a, b] } => format!("элементы {a} и {b} одинаковые"),
-        ErrorKind::Pattern { got, want } => format!("«{got}» не подходит под шаблон {want}"),
-        ErrorKind::Format { got, want, .. } => format!("{got} не в формате {want}"),
-        ErrorKind::FalseSchema => "этого здесь быть не должно".into(),
-        ErrorKind::Not => "подходит под то, что запрещено (not)".into(),
-        ErrorKind::AnyOf | ErrorKind::OneOf(None) => "не подходит ни под один вариант".into(),
-        ErrorKind::OneOf(Some((a, b))) => format!("подходит сразу под варианты {a} и {b}, а нужен один"),
-        ErrorKind::Contains => "нет ни одного подходящего элемента".into(),
+        ErrorKind::Type { got, want } => {
+            let want = want.iter().map(kind).collect::<Vec<_>>().join(tr_static!(" или ", " or "));
+            tr!("ожидалось {}, а здесь {}", "expected {}, got {}", want, kind(*got))
+        }
+        ErrorKind::Required { want } if want.len() == 1 => tr!("нет поля {}", "no field {}", want[0]),
+        ErrorKind::Required { want } => tr!("нет полей {}", "no fields {}", list(want)),
+        ErrorKind::AdditionalProperties { got } => tr!("лишние поля: {}", "extra fields: {}", list(got)),
+        ErrorKind::Enum { want } => tr!("ожидалось одно из {}", "expected one of {}", list(want.iter())),
+        ErrorKind::Const { want } => tr!("ожидалось {want}", "expected {want}"),
+        ErrorKind::Minimum { got, want } => tr!("{got} меньше {want}", "{got} is less than {want}"),
+        ErrorKind::Maximum { got, want } => tr!("{got} больше {want}", "{got} is greater than {want}"),
+        ErrorKind::ExclusiveMinimum { got, want } => tr!("{got} не больше {want}", "{got} is not greater than {want}"),
+        ErrorKind::ExclusiveMaximum { got, want } => tr!("{got} не меньше {want}", "{got} is not less than {want}"),
+        ErrorKind::MultipleOf { got, want } => tr!("{got} не делится на {want}", "{got} is not a multiple of {want}"),
+        ErrorKind::MinLength { got, want } => tr!("длина {got}, а нужно не меньше {want}", "length {got}, needs at least {want}"),
+        ErrorKind::MaxLength { got, want } => tr!("длина {got}, а нужно не больше {want}", "length {got}, needs at most {want}"),
+        ErrorKind::MinItems { got, want } => tr!("элементов {got}, а нужно не меньше {want}", "{got} items, needs at least {want}"),
+        ErrorKind::MaxItems { got, want } => tr!("элементов {got}, а нужно не больше {want}", "{got} items, needs at most {want}"),
+        ErrorKind::MinProperties { got, want } => tr!("полей {got}, а нужно не меньше {want}", "{got} fields, needs at least {want}"),
+        ErrorKind::MaxProperties { got, want } => tr!("полей {got}, а нужно не больше {want}", "{got} fields, needs at most {want}"),
+        ErrorKind::UniqueItems { got: [a, b] } => tr!("элементы {a} и {b} одинаковые", "items {a} and {b} are the same"),
+        ErrorKind::Pattern { got, want } => tr!("«{got}» не подходит под шаблон {want}", "\"{got}\" does not match the pattern {want}"),
+        ErrorKind::Format { got, want, .. } => tr!("{got} не в формате {want}", "{got} is not in the {want} format"),
+        ErrorKind::FalseSchema => tr!("этого здесь быть не должно", "this must not be here"),
+        ErrorKind::Not => tr!("подходит под то, что запрещено (not)", "matches what is forbidden (not)"),
+        ErrorKind::AnyOf | ErrorKind::OneOf(None) => tr!("не подходит ни под один вариант", "matches none of the options"),
+        ErrorKind::OneOf(Some((a, b))) => tr!("подходит сразу под варианты {a} и {b}, а нужен один", "matches both options {a} and {b}, needs exactly one"),
+        ErrorKind::Contains => tr!("нет ни одного подходящего элемента", "no matching item"),
         ErrorKind::DependentRequired { prop, missing } | ErrorKind::Dependency { prop, missing } => {
-            format!("раз есть {prop}, нужны и {}", list(missing))
+            tr!("раз есть {prop}, нужны и {}", "since {prop} is present, {} are needed too", list(missing))
         }
         other => other.to_string(),
     }

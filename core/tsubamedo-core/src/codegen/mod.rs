@@ -175,23 +175,39 @@ impl Spec {
 /// The request in a language of [`LANGUAGES`].
 pub fn generate(language: &str, spec: &Spec) -> Result<String, String> {
     let lang = LANGUAGES.iter().find(|l| l.id == language).ok_or_else(|| {
-        format!("неизвестный язык «{language}», есть: {}", LANGUAGES.iter().map(|l| l.id).collect::<Vec<_>>().join(", "))
+        let known = LANGUAGES.iter().map(|l| l.id).collect::<Vec<_>>().join(", ");
+        tr!("неизвестный язык «{language}», есть: {known}", "unknown language \"{language}\", there are: {known}")
     })?;
     let mut notes = Vec::new();
     if spec.digest.is_some() && !lang.caps.digest {
-        notes.push("Digest-авторизация здесь не повторяется: добавьте её средствами библиотеки.");
+        notes.push(tr_static!(
+            "Digest-авторизация здесь не повторяется: добавьте её средствами библиотеки.",
+            "Digest authorization is not repeated here: add it with the library's own means."
+        ));
     }
     if spec.aws.is_some() && lang.id != "curl" {
-        notes.push("Подпись AWS Signature v4 здесь не повторяется: она делается в момент отправки — подпишите запрос SDK AWS или библиотекой подписи.");
+        notes.push(tr_static!(
+            "Подпись AWS Signature v4 здесь не повторяется: она делается в момент отправки — подпишите запрос SDK AWS или библиотекой подписи.",
+            "The AWS Signature v4 is not repeated here: it is made at the moment of sending — sign the request with the AWS SDK or a signing library."
+        ));
     }
     if spec.insecure && !lang.caps.insecure {
-        notes.push("В запросе выключена проверка сертификата, здесь она включена.");
+        notes.push(tr_static!(
+            "В запросе выключена проверка сертификата, здесь она включена.",
+            "The request has certificate verification off; here it is on."
+        ));
     }
     if !spec.follow && !lang.caps.no_follow {
-        notes.push("Запрос не переходит по перенаправлениям, а этот код переходит.");
+        notes.push(tr_static!(
+            "Запрос не переходит по перенаправлениям, а этот код переходит.",
+            "The request does not follow redirects, but this code does."
+        ));
     }
     if matches!(spec.body, Payload::Multipart(_)) && !lang.caps.multipart {
-        notes.push("Тело multipart/form-data здесь не собирается — для него удобнее curl, requests или OkHttp.");
+        notes.push(tr_static!(
+            "Тело multipart/form-data здесь не собирается — для него удобнее curl, requests или OkHttp.",
+            "A multipart/form-data body is not built here — curl, requests or OkHttp suit it better."
+        ));
     }
     let code = targets::write(lang.id, spec);
     Ok(with_notes(lang.id, code, &notes))

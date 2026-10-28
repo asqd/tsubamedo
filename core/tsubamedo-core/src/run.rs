@@ -78,8 +78,8 @@ impl Exchange {
         for c in self.checks.iter().filter(|c| !c.ok) {
             let why = match (&c.error, &c.actual) {
                 (Some(e), _) => e.clone(),
-                (None, Some(actual)) => format!("пришло {actual}"),
-                (None, None) => "не выполнено".into(),
+                (None, Some(actual)) => tr!("пришло {actual}", "got {actual}"),
+                (None, None) => tr!("не выполнено", "not run"),
             };
             out.push(format!("{} — {why}", c.check));
         }
@@ -351,7 +351,7 @@ impl Runner {
                         set_by_script.push(Captured { name, value: Some(value), error: None });
                     }
                     if let Some(e) = out.error {
-                        let result = Err(Error::Script(format!("скрипт до запроса: {e}")));
+                        let result = Err(Error::Script(tr!("скрипт до запроса: {e}", "script before the request: {e}")));
                         return Exchange { id, request, sent: None, result, checks: Vec::new(), captures: set_by_script, logs };
                     }
                     scripted
@@ -407,12 +407,15 @@ impl Runner {
             {
                 match oauth::token(o, &self.tokens, &self.options, Mode::Renew).await {
                     Ok(got) => {
-                        logs.push("OAuth 2.0: сервер не принял сохранённый токен (401), запрос отправлен ещё раз с новым".into());
+                        logs.push(tr!(
+                            "OAuth 2.0: сервер не принял сохранённый токен (401), запрос отправлен ещё раз с новым",
+                            "OAuth 2.0: the server rejected the saved token (401), the request was sent again with a new one"
+                        ));
                         logs.extend(got.note);
                         set_authorization(&mut prepared, got.token.header());
                         result = http::send(&prepared, &options).await;
                     }
-                    Err(e) => logs.push(format!("сервер не принял сохранённый токен (401), а новый не получен: {e}")),
+                    Err(e) => logs.push(tr!("сервер не принял сохранённый токен (401), а новый не получен: {e}", "the server rejected the saved token (401), and a new one was not obtained: {e}")),
                 }
             }
             // Digest: the first answer is the server's challenge; the request goes again with
@@ -504,7 +507,7 @@ impl Runner {
             }
             results.extend(out.tests.into_iter().map(|t| CheckResult { check: t.name, ok: t.ok, actual: None, error: t.error }));
             if let Some(e) = out.error {
-                results.push(CheckResult { check: "скрипт после ответа".into(), ok: false, actual: None, error: Some(e) });
+                results.push(CheckResult { check: tr!("скрипт после ответа", "script after the response"), ok: false, actual: None, error: Some(e) });
             }
         }
         results.extend(checks::run_checks(&request.checks, &answer, &self.vars(), Some(dir)));

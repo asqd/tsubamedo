@@ -2,6 +2,7 @@
 // The language picked last is picked again next time.
 import { useEffect, useState } from "react";
 import { api, Language, Request } from "../api";
+import { t } from "../i18n";
 import { LanguagePicker } from "./LanguagePicker";
 
 function storedLang(): string {
@@ -48,25 +49,27 @@ export function CodeDialog({ id, request, env, onClose }: { id: string | null; r
 
   return (
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal code-dialog" role="dialog" aria-label="Код" onKeyDown={(e) => e.key === "Escape" && onClose()}>
+      <div className="modal code-dialog" role="dialog" aria-label={t("Код", "Code")} onKeyDown={(e) => e.key === "Escape" && onClose()}>
         <div className="code-head">
-          <h2>Код запроса</h2>
+          <h2>{t("Код запроса", "Request code")}</h2>
           <LanguagePicker languages={languages} value={lang} onChange={setLang} />
           <span className="sp" />
-          <button className="icon" title="Закрыть" onClick={onClose}>
+          <button className="icon" title={t("Закрыть", "Close")} onClick={onClose}>
             ×
           </button>
         </div>
         <p className="faint small">
-          С подставленными переменными{env ? ` окружения ${env}` : ""}; незаданные — как &lt;имя&gt;. Файлы multipart и тела — по их путям.
+          {env
+            ? t(`С подставленными переменными окружения ${env}; незаданные — как <имя>. Файлы multipart и тела — по их путям.`, `With variables of the ${env} environment filled in; unset ones as <name>. Multipart files and bodies by their paths.`)
+            : t("С подставленными переменными; незаданные — как <имя>. Файлы multipart и тела — по их путям.", "With variables filled in; unset ones as <name>. Multipart files and bodies by their paths.")}
         </p>
         {problem && <div className="error-box small">{problem}</div>}
         {code != null && <pre className="code-view mono sel">{code}</pre>}
         <div className="modal-actions">
-          <span className="faint small">{copied ? "Скопировано" : ""}</span>
-          <button onClick={onClose}>Закрыть</button>
+          <span className="faint small">{copied ? t("Скопировано", "Copied") : ""}</span>
+          <button onClick={onClose}>{t("Закрыть", "Close")}</button>
           <button className="primary" autoFocus onClick={copy} disabled={code == null}>
-            Скопировать
+            {t("Скопировать", "Copy")}
           </button>
         </div>
       </div>

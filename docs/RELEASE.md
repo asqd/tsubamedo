@@ -58,10 +58,11 @@
 (`<владелец>.github.io/<репозиторий>/`) при изменении на `main`. Один раз в настройках
 репозитория: Settings → Pages → Source: GitHub Actions.
 
-Снимки экрана (`site/assets/shots`, светлые и тёмные) снимаются заново командой
-`make screens` при запущенном `make bridge`: демо-коллекция `design/screens/shop` и её серверы
-(`design/screens/servers.py`), прокликанные в WebKit (`design/screenshot.swift`). Чужие
-коллекции в кадр не попадают.
+Снимки экрана (`site/assets/shots`, светлые и тёмные; английские — в `site/assets/shots/en`
+для `site/en/`) снимаются заново командой `make screens` при запущенном `make bridge`:
+демо-коллекции `design/screens/shop` и `shop-en` и их серверы (`design/screens/servers.py`, под
+`/en` — английские данные), прокликанные в WebKit (`design/screenshot.swift`) на русском и на
+английском. Чужие коллекции в кадр не попадают.
 
 ## CI
 

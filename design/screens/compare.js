@@ -1,8 +1,8 @@
-await open("Товары");
+await open(L("Товары", "Products"));
 await send();
-click("Сравнить…");
+click(L("Сравнить…", "Compare…"));
 await sleep(500);
-click("С окружением");
+click(L("С окружением", "With environment"));
 await sleep(300);
 click("prod");
 await sleep(1800);

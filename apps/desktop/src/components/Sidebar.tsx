@@ -2,6 +2,7 @@
 // git.
 import { useEffect, useMemo, useState } from "react";
 import { ChangeKind, CollectionInfo, GitState } from "../api";
+import { t } from "../i18n";
 import { home } from "../platform";
 import { GitActions, GitPanel } from "./GitPanel";
 import { HistoryList } from "./HistoryList";
@@ -62,7 +63,7 @@ export function Sidebar({
     <aside className="sidebar">
       <div className="side-head">
         <div className="ell">
-          <div className="coll-name ell">{collection?.name ?? "Без коллекции"}</div>
+          <div className="coll-name ell">{collection?.name ?? t("Без коллекции", "No collection")}</div>
           {collection && (
             <div className="faint small ell" title={collection.root}>
               {home(collection.root)}
@@ -72,34 +73,34 @@ export function Sidebar({
         <span className="sp" />
         {collection && (
           <>
-            <button className="icon" title="Новый запрос (⌘N)" onClick={() => ops.newRequest(selected?.includes("/") ? selected.slice(0, selected.lastIndexOf("/")) : "")}>
+            <button className="icon" title={t("Новый запрос (⌘N)", "New request (⌘N)")} onClick={() => ops.newRequest(selected?.includes("/") ? selected.slice(0, selected.lastIndexOf("/")) : "")}>
               +
             </button>
-            <button className="icon" title="Запустить всю коллекцию: запросы по очереди с проверками" disabled={collection.requests.length === 0} onClick={() => ops.run("")}>
+            <button className="icon" title={t("Запустить всю коллекцию: запросы по очереди с проверками", "Run the whole collection: requests one by one, with checks")} disabled={collection.requests.length === 0} onClick={() => ops.run("")}>
               ▶
             </button>
-            <button className="icon" title="Перечитать файлы" onClick={onReload}>
+            <button className="icon" title={t("Перечитать файлы", "Reload files")} onClick={onReload}>
               ↻
             </button>
           </>
         )}
-        <button className="icon" title="Импорт из Insomnia, Postman, OpenAPI или HAR (⇧⌘I)" onClick={onImport}>
+        <button className="icon" title={t("Импорт из Insomnia, Postman, OpenAPI или HAR (⇧⌘I)", "Import from Insomnia, Postman, OpenAPI or HAR (⇧⌘I)")} onClick={onImport}>
           ⇣
         </button>
-        <button className="icon" title="Открыть коллекцию (⌘O)" onClick={onOpen}>
+        <button className="icon" title={t("Открыть коллекцию (⌘O)", "Open collection (⌘O)")} onClick={onOpen}>
           ⌂
         </button>
       </div>
       <div className="side-mode">
         <div className="seg">
           <button className={mode === "requests" ? "on" : ""} onClick={() => setMode("requests")}>
-            Запросы
+            {t("Запросы", "Requests")}
           </button>
           <button className={mode === "history" ? "on" : ""} onClick={() => setMode("history")}>
-            История
+            {t("История", "History")}
           </button>
           {collection && (
-            <button className={mode === "changes" ? "on" : ""} onClick={() => setMode("changes")} title="Git: что изменилось, коммит, получить и отправить">
+            <button className={mode === "changes" ? "on" : ""} onClick={() => setMode("changes")} title={t("Git: что изменилось, коммит, получить и отправить", "Git: what changed, commit, pull and push")}>
               Git{changes.length ? ` ${changes.length}` : ""}
             </button>
           )}
@@ -111,29 +112,34 @@ export function Sidebar({
         </nav>
       ) : (
         <>
-      <input className="filter" placeholder={mode === "requests" ? "Найти запрос" : "Найти в истории"} value={filter} spellCheck={false} onChange={(e) => setFilter(e.target.value)} />
+      <input className="filter" placeholder={mode === "requests" ? t("Найти запрос", "Find request") : t("Найти в истории", "Search history")} value={filter} spellCheck={false} onChange={(e) => setFilter(e.target.value)} />
       <nav className="tree">
         {mode === "history" ? (
           <HistoryList version={historyVersion} currentId={selected} filter={filter} onOpen={onOpenHistory} />
         ) : (
           <>
-            <button className={`item scratch ${selected === null ? "on" : ""}`} onClick={() => onSelect(null)} title="Новый черновик (⌘T)">
+            <button className={`item scratch ${selected === null ? "on" : ""}`} onClick={() => onSelect(null)} title={t("Новый черновик (⌘T)", "New draft (⌘T)")}>
               <span className="m faint">✎</span>
-              <span className="ell">Черновик</span>
+              <span className="ell">{t("Черновик", "Draft")}</span>
             </button>
             {collection ? (
               <RequestTree collection={collection} selected={selected} filter={filter} onSelect={onSelect} ops={ops} renameTarget={renameTarget} marks={marks} />
             ) : (
               <div className="side-empty small muted">
-                <p>Коллекция — это папка с файлом tsubamedo.toml: запросы лежат в ней обычными файлами и живут в git.</p>
+                <p>
+                  {t(
+                    "Коллекция — это папка с файлом tsubamedo.toml: запросы лежат в ней обычными файлами и живут в git.",
+                    "A collection is a folder with a tsubamedo.toml file: requests are plain files in it and live in git.",
+                  )}
+                </p>
                 <div className="side-empty-actions">
-                  <button onClick={onOpen}>Открыть папку…</button>
-                  <button onClick={onImport} title="Экспорт Insomnia, коллекция Postman, OpenAPI, HAR">
-                    Импорт…
+                  <button onClick={onOpen}>{t("Открыть папку…", "Open folder…")}</button>
+                  <button onClick={onImport} title={t("Экспорт Insomnia, коллекция Postman, OpenAPI, HAR", "Insomnia export, Postman collection, OpenAPI, HAR")}>
+                    {t("Импорт…", "Import…")}
                   </button>
                 </div>
                 <p className="faint">
-                  Новая коллекция: <code>tsubamedo init</code>
+                  {t("Новая коллекция", "New collection")}: <code>tsubamedo init</code>
                 </p>
               </div>
             )}

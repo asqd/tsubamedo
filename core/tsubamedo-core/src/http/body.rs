@@ -148,7 +148,7 @@ impl Decoder {
             Decoder::Deflate(w) => w.finish()?,
             Decoder::Brotli(mut w) => {
                 w.close()?;
-                w.into_inner().map_err(|_| io::Error::other("поток brotli оборван"))?
+                w.into_inner().map_err(|_| io::Error::other(tr!("поток brotli оборван", "the brotli stream is cut off")))?
             }
         };
         sink.finish()

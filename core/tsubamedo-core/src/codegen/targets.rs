@@ -323,7 +323,7 @@ fn js_body(s: &Spec, node: bool) -> (String, Option<String>) {
             (pre, Some("form".into()))
         }
         Payload::File(path) if node => (String::new(), Some(format!("await openAsBlob({})", js(path)))),
-        Payload::File(path) => (String::new(), Some(format!("file /* {path}: Blob или File из <input type=\"file\"> */"))),
+        Payload::File(path) => (String::new(), Some(tr!("file /* {path}: Blob или File из <input type=\"file\"> */", "file /* {path}: a Blob or File from <input type=\"file\"> */"))),
     }
 }
 
@@ -1017,13 +1017,13 @@ fn raw_http(s: &Spec) -> String {
             let mut b = String::new();
             for f in fields {
                 if f.file {
-                    let _ = write!(
-                        b,
+                    b.push_str(&tr!(
                         "--{boundary}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\n\r\n<содержимое {}>\r\n",
+                        "--{boundary}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\n\r\n<contents of {}>\r\n",
                         f.name,
                         file_name(&f.value),
                         f.value
-                    );
+                    ));
                 } else {
                     let _ = write!(b, "--{boundary}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n", f.name, f.value);
                 }
@@ -1031,7 +1031,7 @@ fn raw_http(s: &Spec) -> String {
             let _ = write!(b, "--{boundary}--\r\n");
             Some(b)
         }
-        Payload::File(path) => Some(format!("<содержимое {path}>")),
+        Payload::File(path) => Some(tr!("<содержимое {path}>", "<contents of {path}>")),
         Payload::Json(_, t) => Some(t.clone()),
         _ => s.text(),
     };

@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashMap};
 use base64::Engine;
 use serde_json::Value;
 
-use super::{Environment, Format, Imported, Placed, Var, array_at, body_of, join_scripts, map_builtins, map_texts, path_name, split_query, str_at, text};
+use super::{Environment, Format, Imported, Placed, Var, array_at, body_of, join_scripts, map_builtins, map_texts, path_name, request_scripts, split_query, str_at, text};
 use crate::model::{ApiKeyLocation, Auth, AwsV4, Body, ClientAuth, Grant, OAuth2, Pair, Part, Request};
 use crate::{Error, Result};
 
@@ -37,9 +37,9 @@ pub fn v4(doc: &Value) -> Result<Imported> {
             .filter_map(|v| match str_at(v, "_type") {
                 "request_group" => Some(Tree::Folder { v, kids: build(str_at(v, "_id"), kids) }),
                 "request" => Some(Tree::Request(v)),
-                "grpc_request" => Some(Tree::Skip("gRPC-запросы")),
-                "websocket_request" => Some(Tree::Skip("WebSocket-запросы")),
-                "unit_test_suite" => Some(Tree::Skip("наборы тестов Insomnia")),
+                "grpc_request" => Some(Tree::Skip(tr_static!("gRPC-запросы", "gRPC requests"))),
+                "websocket_request" => Some(Tree::Skip(tr_static!("WebSocket-запросы", "WebSocket requests"))),
+                "unit_test_suite" => Some(Tree::Skip(tr_static!("наборы тестов Insomnia", "Insomnia test suites"))),
                 _ => None,
             })
             .collect()
@@ -91,9 +91,9 @@ pub fn v5(doc: &Value) -> Result<Imported> {
                 if let Some(kids) = v.get("children").and_then(Value::as_array) {
                     Tree::Folder { v, kids: build(kids) }
                 } else if id.starts_with("greq_") || v.get("protoMethodName").is_some() {
-                    Tree::Skip("gRPC-запросы")
+                    Tree::Skip(tr_static!("gRPC-запросы", "gRPC requests"))
                 } else if id.starts_with("ws-req_") {
-                    Tree::Skip("WebSocket-запросы")
+                    Tree::Skip(tr_static!("WebSocket-запросы", "WebSocket requests"))
                 } else {
                     Tree::Request(v)
                 }
@@ -101,7 +101,10 @@ pub fn v5(doc: &Value) -> Result<Imported> {
             .collect()
     }
     if !kind.starts_with("collection.") && !kind.starts_with("environment.") {
-        return Err(Error::Invalid(format!("Insomnia {kind}: импортируются коллекции и окружения (для документа дизайна есть импорт OpenAPI)")));
+        return Err(Error::Invalid(tr!(
+            "Insomnia {kind}: импортируются коллекции и окружения (для документа дизайна есть импорт OpenAPI)",
+            "Insomnia {kind}: collections and environments are imported (for a design document, import OpenAPI)"
+        )));
     }
     let mut c = Converter::default();
     let tree = build(array_at(doc, "collection"));
@@ -155,7 +158,7 @@ impl Converter {
                     }
                     next.headers.extend(self.pairs(array_at(v, "headers")));
                     let (before, after) = scripts(v);
-                    let from = format!("из папки «{}»", str_at(v, "name"));
+                    let from = tr!("из папки «{}»", "from folder \"{}\"", str_at(v, "name"));
                     next.before.push((from.clone(), before.to_string()));
                     next.after.push((from, after.to_string()));
                     self.walk(kids, &path, &next);
@@ -206,9 +209,9 @@ impl Converter {
         };
         let (before, after) = scripts(v);
         let mut befores: Vec<(String, &str)> = inherited.before.iter().map(|(f, s)| (f.clone(), s.as_str())).collect();
-        befores.push(("запроса".into(), before));
+        befores.push((request_scripts().into(), before));
         let mut afters: Vec<(String, &str)> = inherited.after.iter().map(|(f, s)| (f.clone(), s.as_str())).collect();
-        afters.push(("запроса".into(), after));
+        afters.push((request_scripts().into(), after));
         request.scripts.before = join_scripts(&befores);
         request.scripts.after = join_scripts(&afters);
 
@@ -263,7 +266,10 @@ impl Converter {
                     "client_credentials" => Grant::ClientCredentials,
                     "password" => Grant::Password,
                     "implicit" => {
-                        self.warnings.push("OAuth 2.0 implicit из Insomnia перенесён как authorization code с PKCE: implicit устарел и не поддерживается".into());
+                        self.warnings.push(tr!(
+                            "OAuth 2.0 implicit из Insomnia перенесён как authorization code с PKCE: implicit устарел и не поддерживается",
+                            "OAuth 2.0 implicit from Insomnia became authorization code with PKCE: implicit is obsolete and not supported"
+                        ));
                         Grant::AuthorizationCode
                     }
                     _ => Grant::AuthorizationCode,
@@ -286,7 +292,10 @@ impl Converter {
                 })
             }
             other => {
-                self.warnings.push(format!("авторизация {other} из Insomnia пока не поддерживается — у таких запросов её нет"));
+                self.warnings.push(tr!(
+                    "авторизация {other} из Insomnia пока не поддерживается — у таких запросов её нет",
+                    "{other} authorization from Insomnia is not supported yet — such requests have none"
+                ));
                 Auth::None
             }
         }
@@ -376,7 +385,7 @@ impl Converter {
                     .and_then(|n| n.strip_suffix("']").or_else(|| n.strip_suffix("\"]")))
                     .unwrap_or(name);
                 if name.contains('|') || name.contains('(') {
-                    warnings.push(format!("выражение {whole} из Insomnia оставлено как есть"));
+                    warnings.push(tr!("выражение {whole} из Insomnia оставлено как есть", "the Insomnia expression {whole} was left as is"));
                     out.push_str(whole);
                 } else {
                     out.push_str(&format!("{{{{{}}}}}", name.trim()));
@@ -402,7 +411,7 @@ impl Converter {
                 "iso-8601" => "{{$isoTimestamp}}".into(),
                 _ if name == "timestamp" => "{{$timestampMs}}".into(),
                 other => {
-                    warnings.push(format!("тег {{% now '{other}' %}} заменён на время в миллисекундах"));
+                    warnings.push(tr!("тег {{% now '{other}' %}} заменён на время в миллисекундах", "the tag {{% now '{other}' %}} became the time in milliseconds"));
                     "{{$timestampMs}}".into()
                 }
             },
@@ -414,7 +423,10 @@ impl Converter {
                     "header" => format!("header {path}"),
                     "raw" => "body".into(),
                     other => {
-                        warnings.push(format!("тег response «{other}» с путём {path} не перенесён: поддерживаются JSONPath, заголовок и тело"));
+                        warnings.push(tr!(
+                            "тег response «{other}» с путём {path} не перенесён: поддерживаются JSONPath, заголовок и тело",
+                            "the response tag \"{other}\" with path {path} was not carried over: JSONPath, a header and the body are supported"
+                        ));
                         return whole.to_string();
                     }
                 };
@@ -422,7 +434,7 @@ impl Converter {
                 format!("{{{{{var}}}}}")
             }
             other => {
-                warnings.push(format!("тег Insomnia {{% {other} %}} оставлен как есть: у нас его нет"));
+                warnings.push(tr!("тег Insomnia {{% {other} %}} оставлен как есть: у нас его нет", "the Insomnia tag {{% {other} %}} was left as is: there is no such tag here"));
                 whole.to_string()
             }
         }
@@ -453,13 +465,17 @@ impl Converter {
 
     fn finish(mut self, name: String, vars: Vec<Var>, environments: Vec<Environment>) -> Imported {
         for (what, n) in &self.skipped {
-            self.warnings.push(format!("{what} ({n}) пропущены: в TsubameDo их пока нет"));
+            self.warnings.push(tr!("{what} ({n}) пропущены: в TsubameDo их пока нет", "{what} ({n}) skipped: TsubameDo does not have them yet"));
         }
         let ids: Vec<&String> = self.out.iter().map(|(id, _)| id).collect();
         for (id, captures) in &self.captures {
             if !ids.contains(&id) {
                 let names: Vec<&str> = captures.iter().map(|p| p.name.as_str()).collect();
-                self.warnings.push(format!("значения {} берутся из запроса {id}, которого нет в файле", names.join(", ")));
+                self.warnings.push(tr!(
+                    "значения {} берутся из запроса {id}, которого нет в файле",
+                    "values {} come from request {id}, which is not in the file",
+                    names.join(", ")
+                ));
             }
         }
         let requests = self

@@ -52,16 +52,20 @@ pub fn har(doc: &Value) -> Result<Imported> {
             .filter(|h| keep_header(&h.name))
             .collect();
         if headers.iter().any(|h| h.name.eq_ignore_ascii_case("cookie") || h.name.eq_ignore_ascii_case("authorization")) {
-            warnings.push(
-                "в запросах остались заголовки Cookie и Authorization из браузера — это ваши действующие данные входа, не отправляйте их в git".into(),
-            );
+            warnings.push(tr!(
+                "в запросах остались заголовки Cookie и Authorization из браузера — это ваши действующие данные входа, не отправляйте их в git",
+                "the requests keep the Cookie and Authorization headers from the browser — these are your live sign-in data, do not push them to git"
+            ));
         }
         let body = body(post, &mut warnings);
         let host = parsed.host_str().unwrap_or_default().to_string();
         kept.push((host, Request { name: Some(path_name(&url)), method, url, query, headers, body, ..Request::default() }));
     }
     if skipped > 0 {
-        warnings.push(format!("пропущено записей: {skipped} — файлы страницы (картинки, стили, скрипты, шрифты) и проверки CORS"));
+        warnings.push(tr!(
+            "пропущено записей: {skipped} — файлы страницы (картинки, стили, скрипты, шрифты) и проверки CORS",
+            "entries skipped: {skipped} — page files (images, styles, scripts, fonts) and CORS checks"
+        ));
     }
     let hosts: HashSet<&str> = kept.iter().map(|(h, _)| h.as_str()).collect();
     let several = hosts.len() > 1;
@@ -112,7 +116,10 @@ fn body(post: &Value, warnings: &mut Vec<String>) -> Body {
                 })
                 .collect();
             if parts.iter().any(|p| p.is_file) {
-                warnings.push("в HAR нет содержимого отправленных файлов: у полей-файлов указано только имя, выберите файл заново".into());
+                warnings.push(tr!(
+                    "в HAR нет содержимого отправленных файлов: у полей-файлов указано только имя, выберите файл заново",
+                    "HAR does not keep the content of sent files: file fields have only a name, choose the file again"
+                ));
             }
             Body::Multipart { parts }
         }

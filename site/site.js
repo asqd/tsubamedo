@@ -1,7 +1,26 @@
-// The repository from the address (<owner>.github.io/<repo>/), and the files of its latest
-// release: links, sizes and the version come from the GitHub API, so the page never needs
-// editing for a release. Without the API the links lead to the release page.
+// The repository from the address (<owner>.github.io/<repo>/, also <repo>/en/), and the files
+// of its latest release: links, sizes and the version come from the GitHub API, so the page
+// never needs editing for a release. Without the API the links lead to the release page.
+// Every text written here follows the page's <html lang>.
 (function () {
+  const english = document.documentElement.lang.startsWith("en");
+  const text = english
+    ? { locale: "en-US", mb: "MB", version: (v, date) => `Version ${v}, released ${date} · `, news: "What’s new" }
+    : { locale: "ru-RU", mb: "МБ", version: (v, date) => `Версия ${v} от ${date} · `, news: "Что нового" };
+
+  // The language switcher: the choice is remembered, so the Russian page stops sending this
+  // visitor to English, and the section being read is kept.
+  for (const a of document.querySelectorAll(".lang a[hreflang]")) {
+    a.addEventListener("click", () => {
+      try {
+        localStorage.setItem("tsubamedo.lang", a.hreflang);
+      } catch (e) {
+        // Storage blocked: the switch still works, it just isn't remembered.
+      }
+      a.href = a.getAttribute("href").split("#")[0] + location.hash;
+    });
+  }
+
   const fallback = "asqd/tsubamedo";
   const owner = location.hostname.match(/^([^.]+)\.github\.io$/);
   const first = location.pathname.split("/").filter(Boolean)[0];
@@ -15,7 +34,9 @@
 
   // `tsubamedo-*-linux-x86_64.tar.gz`: a pattern of the end of the file's name.
   const matcher = (pattern) => new RegExp(pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
-  const mb = (bytes) => `${(bytes / 1048576).toFixed(1).replace(".", ",")} МБ`;
+  // «9,2 МБ» or «9.2 MB».
+  const mb = (bytes) =>
+    `${(bytes / 1048576).toLocaleString(text.locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ${text.mb}`;
 
   fetch(`https://api.github.com/repos/${repo}/releases/latest`)
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
@@ -29,12 +50,12 @@
         a.title = `${asset.name}, ${mb(asset.size)}`;
       }
       const version = release.tag_name.replace(/^v/, "");
-      const date = new Date(release.published_at).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+      const date = new Date(release.published_at).toLocaleDateString(text.locale, { day: "numeric", month: "long", year: "numeric" });
       const note = document.getElementById("release");
-      note.textContent = `Версия ${version} от ${date}. `;
+      note.textContent = text.version(version, date);
       const all = document.createElement("a");
       all.href = release.html_url;
-      all.textContent = "Что нового";
+      all.textContent = text.news;
       note.append(all);
       const cli = find("tsubamedo-*-macos-apple-silicon.tar.gz");
       if (cli) document.getElementById("cli-name").textContent = cli.name;

@@ -102,7 +102,7 @@ pub fn before(script: &str, request: &Request, vars: &Vars, cookies: &[Cookie]) 
         query: request.query.clone(),
         body,
     };
-    let (changed, outcome) = run(script, json!({ "vars": vars, "request": input, "response": null, "cookies": cookies }));
+    let (changed, outcome) = run(script, json!({ "vars": vars, "request": input, "response": null, "cookies": cookies, "english": crate::lang::english() }));
     let mut request = request.clone();
     if let Some(r) = changed {
         request.method = r.method;
@@ -126,7 +126,7 @@ pub fn after(script: &str, sent: &Prepared, response: &Response, vars: &Vars, co
         body: Some(String::from_utf8_lossy(&sent.body).into_owned()),
     };
     let (body, body_error) = if response.body.len() > BODY_LIMIT {
-        (None, Some(format!("тело больше {} МБ — скрипту его не отдать", BODY_LIMIT >> 20)))
+        (None, Some(tr!("тело больше {} МБ — скрипту его не отдать", "the body is over {} MB — too big to give to a script", BODY_LIMIT >> 20)))
     } else {
         let mut bytes = Vec::new();
         match response.body.reader().and_then(|mut r| r.read_to_end(&mut bytes)) {
@@ -143,7 +143,7 @@ pub fn after(script: &str, sent: &Prepared, response: &Response, vars: &Vars, co
         "body": body,
         "bodyError": body_error,
     });
-    run(script, json!({ "vars": vars, "request": request, "response": response, "cookies": cookies })).1
+    run(script, json!({ "vars": vars, "request": request, "response": response, "cookies": cookies, "english": crate::lang::english() })).1
 }
 
 /// Where a script keeps variables: ours, and the scopes of Postman and Insomnia, which are
@@ -173,16 +173,16 @@ fn names(script: &str, pattern: &str) -> Vec<String> {
 
 fn run(script: &str, input: serde_json::Value) -> (Option<ScriptRequest>, Outcome) {
     let failed = |error: String| (None, Outcome { error: Some(error), ..Outcome::default() });
-    let Ok(runtime) = Runtime::new() else { return failed("не удалось запустить QuickJS".into()) };
+    let Ok(runtime) = Runtime::new() else { return failed(tr!("не удалось запустить QuickJS", "could not start QuickJS")) };
     runtime.set_memory_limit(MEMORY_LIMIT);
     runtime.set_max_stack_size(1 << 20);
     let deadline = Instant::now() + TIME_LIMIT;
     runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() > deadline)));
-    let Ok(context) = Context::full(&runtime) else { return failed("не удалось запустить QuickJS".into()) };
+    let Ok(context) = Context::full(&runtime) else { return failed(tr!("не удалось запустить QuickJS", "could not start QuickJS")) };
 
     context.with(|ctx| {
         if let Err(e) = install(&ctx, &input.to_string()) {
-            return failed(format!("окружение скрипта: {}", describe(&ctx, e)));
+            return failed(tr!("окружение скрипта: {}", "script environment: {}", describe(&ctx, e)));
         }
         // Not strict, like the scripts of other HTTP clients: `x = 1` just works.
         let mut options = EvalOptions::default();
@@ -193,14 +193,14 @@ fn run(script: &str, input: serde_json::Value) -> (Option<ScriptRequest>, Outcom
         while result.is_ok() && ctx.execute_pending_job() {}
         let error = result.err().map(|e| {
             if Instant::now() > deadline {
-                format!("скрипт работал дольше {} с и был остановлен", TIME_LIMIT.as_secs())
+                tr!("скрипт работал дольше {} с и был остановлен", "the script ran longer than {} s and was stopped", TIME_LIMIT.as_secs())
             } else {
                 describe(&ctx, e)
             }
         });
         // What it managed before an error is still worth showing.
         let output: Option<Output> = ctx.eval::<String, _>("__output()").ok().and_then(|s| serde_json::from_str(&s).ok());
-        let Some(output) = output else { return failed(error.unwrap_or_else(|| "скрипт сломал своё окружение".into())) };
+        let Some(output) = output else { return failed(error.unwrap_or_else(|| tr!("скрипт сломал своё окружение", "the script broke its environment"))) };
         let vars = output
             .vars
             .into_iter()
@@ -219,7 +219,7 @@ fn install(ctx: &Ctx<'_>, input: &str) -> rquickjs::Result<()> {
             "sha1" => &ring::digest::SHA1_FOR_LEGACY_USE_ONLY,
             "sha256" => &ring::digest::SHA256,
             "sha512" => &ring::digest::SHA512,
-            _ => return Err(Exception::throw_message(&ctx, &format!("неизвестный алгоритм {alg}"))),
+            _ => return Err(Exception::throw_message(&ctx, &tr!("неизвестный алгоритм {alg}", "unknown algorithm {alg}"))),
         };
         encode(&ctx, ring::digest::digest(alg, text.as_bytes()).as_ref(), &encoding)
     })?)?;
@@ -229,7 +229,7 @@ fn install(ctx: &Ctx<'_>, input: &str) -> rquickjs::Result<()> {
             "sha256" => ring::hmac::HMAC_SHA256,
             "sha384" => ring::hmac::HMAC_SHA384,
             "sha512" => ring::hmac::HMAC_SHA512,
-            _ => return Err(Exception::throw_message(&ctx, &format!("hmac: неизвестный алгоритм {alg}, есть sha1, sha256, sha384, sha512"))),
+            _ => return Err(Exception::throw_message(&ctx, &tr!("hmac: неизвестный алгоритм {alg}, есть sha1, sha256, sha384, sha512", "hmac: unknown algorithm {alg}, there are sha1, sha256, sha384, sha512"))),
         };
         let tag = ring::hmac::sign(&ring::hmac::Key::new(alg, key.as_bytes()), text.as_bytes());
         encode(&ctx, tag.as_ref(), &encoding)
@@ -240,7 +240,7 @@ fn install(ctx: &Ctx<'_>, input: &str) -> rquickjs::Result<()> {
             return Ok(b64.encode(text.as_bytes()));
         }
         let bytes = b64.decode(text.trim()).map_err(|e| Exception::throw_message(&ctx, &format!("atob: {e}")))?;
-        String::from_utf8(bytes).map_err(|_| Exception::throw_message(&ctx, "atob: внутри не текст UTF-8"))
+        String::from_utf8(bytes).map_err(|_| Exception::throw_message(&ctx, tr_static!("atob: внутри не текст UTF-8", "atob: not UTF-8 text inside")))
     })?)?;
     g.set("__uuid", Function::new(ctx.clone(), || uuid::Uuid::new_v4().to_string())?)?;
     for (code, name) in [(PRELUDE, "prelude"), (COMPAT, "compat")] {
@@ -255,7 +255,7 @@ fn encode(ctx: &Ctx<'_>, bytes: &[u8], encoding: &str) -> rquickjs::Result<Strin
     match encoding {
         "hex" => Ok(bytes.iter().map(|b| format!("{b:02x}")).collect()),
         "base64" => Ok(base64::engine::general_purpose::STANDARD.encode(bytes)),
-        other => Err(Exception::throw_message(ctx, &format!("кодировка {other}: есть hex и base64"))),
+        other => Err(Exception::throw_message(ctx, &tr!("кодировка {other}: есть hex и base64", "encoding {other}: there are hex and base64"))),
     }
 }
 
@@ -263,7 +263,7 @@ fn encode(ctx: &Ctx<'_>, bytes: &[u8], encoding: &str) -> rquickjs::Result<Strin
 fn describe(ctx: &Ctx<'_>, error: rquickjs::Error) -> String {
     match CaughtError::from_error(ctx, error) {
         CaughtError::Exception(e) => {
-            let message = e.message().unwrap_or_else(|| "ошибка".into());
+            let message = e.message().unwrap_or_else(|| tr!("ошибка", "error"));
             let line = e.stack().and_then(|stack| {
                 stack.lines().find(|l| l.contains(&format!("{FILENAME}:"))).and_then(|l| {
                     let mut parts = l.rsplit(':');
@@ -272,11 +272,11 @@ fn describe(ctx: &Ctx<'_>, error: rquickjs::Error) -> String {
                 })
             });
             match line {
-                Some(n) => format!("{message} (строка {n})"),
+                Some(n) => tr!("{message} (строка {n})", "{message} (line {n})"),
                 None => message,
             }
         }
-        CaughtError::Value(v) => format!("выброшено {v:?}"),
+        CaughtError::Value(v) => tr!("выброшено {v:?}", "thrown {v:?}"),
         CaughtError::Error(e) => e.to_string(),
     }
 }

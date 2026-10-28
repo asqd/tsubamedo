@@ -2,6 +2,8 @@
 // where it goes — a new collection or a folder of the open one.
 import { useState } from "react";
 import { CollectionInfo, ImportPreview } from "../api";
+import { noun } from "../format";
+import { t } from "../i18n";
 import { home } from "../platform";
 
 export type ImportTarget = { kind: "current" } | { kind: "new" };
@@ -24,22 +26,26 @@ export function ImportDialog({
   const [target, setTarget] = useState<ImportTarget["kind"]>(collection ? "current" : "new");
   const onlyVars = preview.requests === 0;
   const what = [
-    preview.requests > 0 && `${preview.requests} ${plural(preview.requests, "запрос", "запроса", "запросов")}`,
-    preview.folders > 0 && `${preview.folders} ${plural(preview.folders, "папка", "папки", "папок")}`,
-    preview.environments.length > 0 && `окружения: ${preview.environments.join(", ")}`,
-    preview.vars > 0 && `${preview.vars} ${plural(preview.vars, "переменная", "переменные", "переменных")} коллекции`,
+    preview.requests > 0 && `${preview.requests} ${noun(preview.requests, ["запрос", "запроса", "запросов"], ["request", "requests"])}`,
+    preview.folders > 0 && `${preview.folders} ${noun(preview.folders, ["папка", "папки", "папок"], ["folder", "folders"])}`,
+    preview.environments.length > 0 && t(`окружения: ${preview.environments.join(", ")}`, `environments: ${preview.environments.join(", ")}`),
+    preview.vars > 0 &&
+      t(
+        `${preview.vars} ${noun(preview.vars, ["переменная", "переменные", "переменных"], ["variable", "variables"])} коллекции`,
+        `${preview.vars} collection ${noun(preview.vars, ["переменная", "переменные", "переменных"], ["variable", "variables"])}`,
+      ),
   ].filter(Boolean);
 
   return (
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && !busy && onCancel()}>
-      <div className="modal import-dialog" role="dialog" aria-label="Импорт" onKeyDown={(e) => e.key === "Escape" && !busy && onCancel()}>
+      <div className="modal import-dialog" role="dialog" aria-label={t("Импорт", "Import")} onKeyDown={(e) => e.key === "Escape" && !busy && onCancel()}>
         <h2>
-          Импорт: {preview.format} «{preview.name}»
+          {t(`Импорт: ${preview.format} «${preview.name}»`, `Import: ${preview.format} "${preview.name}"`)}
         </h2>
         <div className="faint small ell" title={path}>
           {home(path)}
         </div>
-        <p>{what.length ? what.join(" · ") : "В файле нет ни запросов, ни переменных."}</p>
+        <p>{what.length ? what.join(" · ") : t("В файле нет ни запросов, ни переменных.", "The file has no requests and no variables.")}</p>
         {preview.warnings.length > 0 && (
           <ul className="import-warnings small">
             {preview.warnings.map((w) => (
@@ -51,39 +57,44 @@ export function ImportDialog({
           <label className={collection ? "" : "off"}>
             <input type="radio" name="target" checked={target === "current"} disabled={!collection} onChange={() => setTarget("current")} />
             <span>
-              В открытую коллекцию{collection && ` «${collection.name}»`}
+              {t("В открытую коллекцию", "Into the open collection")}
+              {collection && t(` «${collection.name}»`, ` "${collection.name}"`)}
               <span className="faint small">
                 {onlyVars
-                  ? " — окружения и переменные добавятся к её; что уже есть, останется как было"
-                  : ` — в новую папку «${preview.name}»; переменные, которых в ней нет, добавятся`}
+                  ? t(
+                      " — окружения и переменные добавятся к её; что уже есть, останется как было",
+                      " — environments and variables are added to its own; what is already there stays as it was",
+                    )
+                  : t(
+                      ` — в новую папку «${preview.name}»; переменные, которых в ней нет, добавятся`,
+                      ` — into a new folder "${preview.name}"; variables it lacks are added`,
+                    )}
               </span>
             </span>
           </label>
           <label>
             <input type="radio" name="target" checked={target === "new"} onChange={() => setTarget("new")} />
             <span>
-              Новой коллекцией<span className="faint small"> — папка «{preview.name}» там, где вы выберете</span>
+              {t("Новой коллекцией", "As a new collection")}
+              <span className="faint small">{t(` — папка «${preview.name}» там, где вы выберете`, ` — a folder "${preview.name}" wherever you choose`)}</span>
             </span>
           </label>
         </fieldset>
-        <p className="faint small">Секреты — токены, пароли, ключи — попадут в файлы *.local.toml, которые не уходят в git.</p>
+        <p className="faint small">
+          {t(
+            "Секреты — токены, пароли, ключи — попадут в файлы *.local.toml, которые не уходят в git.",
+            "Secrets — tokens, passwords, keys — go into *.local.toml files, which stay out of git.",
+          )}
+        </p>
         <div className="modal-actions">
           <button onClick={onCancel} disabled={busy}>
-            Отмена
+            {t("Отмена", "Cancel")}
           </button>
           <button className="primary" autoFocus disabled={busy || what.length === 0} onClick={() => onImport({ kind: target })}>
-            {busy ? "Импортирую…" : target === "new" ? "Выбрать папку и импортировать" : "Импортировать"}
+            {busy ? t("Импортирую…", "Importing…") : target === "new" ? t("Выбрать папку и импортировать", "Choose folder and import") : t("Импортировать", "Import")}
           </button>
         </div>
       </div>
     </div>
   );
-}
-
-function plural(n: number, one: string, few: string, many: string): string {
-  const d = n % 10;
-  const dd = n % 100;
-  if (d === 1 && dd !== 11) return one;
-  if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return few;
-  return many;
 }

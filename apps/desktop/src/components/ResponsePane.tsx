@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { ResponseMeta } from "../api";
 import { ms, size, statusTone } from "../format";
+import { t } from "../i18n";
 import { BodyViewer } from "./BodyViewer";
 
 type Tab = "body" | "checks" | "headers" | "time" | "sent";
@@ -26,8 +27,8 @@ export function ResponsePane({
     return (
       <div className="pane-empty">
         <span className="spin big" />
-        <div className="muted">Отправка…</div>
-        <button onClick={onCancel}>Отменить</button>
+        <div className="muted">{t("Отправка…", "Sending…")}</div>
+        <button onClick={onCancel}>{t("Отменить", "Cancel")}</button>
       </div>
     );
   }
@@ -41,8 +42,8 @@ export function ResponsePane({
   if (!meta) {
     return (
       <div className="pane-empty faint">
-        <div>Ответ появится здесь</div>
-        <div className="small">⌘↵ — отправить запрос</div>
+        <div>{t("Ответ появится здесь", "The response will appear here")}</div>
+        <div className="small">{t("⌘↵ — отправить запрос", "⌘↵ — send the request")}</div>
       </div>
     );
   }
@@ -60,45 +61,47 @@ export function ResponsePane({
         <span className={`status ${statusTone(meta.status)}`}>
           {meta.status} {meta.reason}
         </span>
-        <span className="metric" title="Всё время запроса">
+        <span className="metric" title={t("Всё время запроса", "Total request time")}>
           {ms(meta.timings.total)}
         </span>
-        <span className="metric" title={compressed ? `По сети ${size(meta.wireSize)}` : undefined}>
+        <span className="metric" title={compressed ? t(`По сети ${size(meta.wireSize)}`, `Over the network ${size(meta.wireSize)}`) : undefined}>
           {size(meta.size)}
-          {compressed && <span className="faint"> · сжато {size(meta.wireSize)}</span>}
+          {compressed && <span className="faint">{t(` · сжато ${size(meta.wireSize)}`, ` · compressed ${size(meta.wireSize)}`)}</span>}
         </span>
         <span className="faint small">{meta.version}</span>
         {meta.redirects.length > 0 && (
           <span className="faint small" title={meta.redirects.map((r) => `${r.status} ${r.url}`).join("\n")}>
-            {meta.redirects.length} перенаправл.
+            {meta.redirects.length} {t("перенаправл.", meta.redirects.length === 1 ? "redirect" : "redirects")}
           </span>
         )}
         {checks.length > 0 && (
-          <button className={`check-badge ${failed ? "bad" : "ok"}`} onClick={() => setTab("checks")} title="Проверки ответа">
+          <button className={`check-badge ${failed ? "bad" : "ok"}`} onClick={() => setTab("checks")} title={t("Проверки ответа", "Response checks")}>
             {failed ? "✗" : "✓"} {checks.filter((c) => c.ok).length}/{checks.length}
           </button>
         )}
         {onCompare && (
           <button
             className="ghost small compare-btn"
-            title="Сравнить с ответом из другого окружения или с прошлым"
+            title={t("Сравнить с ответом из другого окружения или с прошлым", "Compare with a response from another environment or an earlier one")}
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
               onCompare(r.left, r.bottom + 4);
             }}
           >
-            Сравнить…
+            {t("Сравнить…", "Compare…")}
           </button>
         )}
       </div>
       <div className="tabs">
         {(
           [
-            ["body", "Тело"],
-            ...(hasChecks ? [["checks", failed ? `Проверки ✗${failed}` : checks.length + captures.length + before.length ? "Проверки" : "Журнал"]] : []),
-            ["headers", `Заголовки ${meta.headers.length}`],
-            ["time", "Время"],
-            ["sent", "Отправлено"],
+            ["body", t("Тело", "Body")],
+            ...(hasChecks
+              ? [["checks", failed ? `${t("Проверки", "Checks")} ✗${failed}` : checks.length + captures.length + before.length ? t("Проверки", "Checks") : t("Журнал", "Log")]]
+              : []),
+            ["headers", `${t("Заголовки", "Headers")} ${meta.headers.length}`],
+            ["time", t("Время", "Timing")],
+            ["sent", t("Отправлено", "Sent")],
           ] as [Tab, string][]
         ).map(([id, label]) => (
           <button key={id} className={tab === id ? "on" : ""} onClick={() => setTab(id)}>
@@ -117,7 +120,7 @@ export function ResponsePane({
               <b>{meta.sent.method}</b> {meta.sent.url}
             </div>
             <HeaderTable headers={meta.sent.headers} />
-            <div className="faint small pad-top">Тело: {meta.sent.bodySize ? size(meta.sent.bodySize) : "нет"}</div>
+            <div className="faint small pad-top">{t("Тело", "Body")}: {meta.sent.bodySize ? size(meta.sent.bodySize) : t("нет", "none")}</div>
           </div>
         )}
       </div>
@@ -134,7 +137,7 @@ function ChecksResult({ meta }: { meta: ResponseMeta }) {
     <div className="scroll pad check-results">
       {before.length > 0 && (
         <>
-          <div className="section-head">Сначала отправлены — за значениями для этого запроса</div>
+          <div className="section-head">{t("Сначала отправлены — за значениями для этого запроса", "Sent first — for values this request needs")}</div>
           {before.map((b, i) => (
             <div key={i} className="check-row">
               <span className={b.passed ? "good-text" : "bad-text"}>{b.passed ? "✓" : "✗"}</span>
@@ -149,19 +152,19 @@ function ChecksResult({ meta }: { meta: ResponseMeta }) {
           ))}
         </>
       )}
-      {checks.length > 0 && <div className="section-head">Проверки</div>}
+      {checks.length > 0 && <div className="section-head">{t("Проверки", "Checks")}</div>}
       {checks.map((c, i) => (
         <div key={i} className="check-row">
           <span className={c.ok ? "good-text" : "bad-text"}>{c.ok ? "✓" : "✗"}</span>
           <span className="mono sel">{c.check}</span>
           {(c.error || c.actual != null) && (
             <div className={`check-why small ${c.ok ? "faint" : "bad-text"}`}>
-              {c.error ?? (c.ok ? c.actual : `пришло ${c.actual}`)}
+              {c.error ?? (c.ok ? c.actual : t(`пришло ${c.actual}`, `got ${c.actual}`))}
             </div>
           )}
         </div>
       ))}
-      {captures.length > 0 && <div className="section-head">Значения из ответа</div>}
+      {captures.length > 0 && <div className="section-head">{t("Значения из ответа", "Values from the response")}</div>}
       {captures.map((c, i) => (
         <div key={i} className="check-row">
           <span className={c.error ? "bad-text" : "good-text"}>{c.error ? "✗" : "→"}</span>
@@ -171,7 +174,7 @@ function ChecksResult({ meta }: { meta: ResponseMeta }) {
       ))}
       {(meta.logs ?? []).length > 0 && (
         <>
-          <div className="section-head">Журнал: скрипты и авторизация</div>
+          <div className="section-head">{t("Журнал: скрипты и авторизация", "Log: scripts and authorization")}</div>
           <pre className="script-log mono small sel">{(meta.logs ?? []).join("\n")}</pre>
         </>
       )}
@@ -200,15 +203,15 @@ function HeaderTable({ headers }: { headers: [string, string][] }) {
 
 /** Phases as bars on one time line, like the network panel of a browser. */
 function TimingChart({ meta }: { meta: ResponseMeta }) {
-  const t = meta.timings;
+  const tm = meta.timings;
   const phases: [string, number, string][] = [
-    ["DNS", t.dns, "p-dns"],
-    ["Подключение", t.connect, "p-tcp"],
-    ...(t.tls != null ? ([["TLS", t.tls, "p-tls"]] as [string, number, string][]) : []),
-    ["Ожидание ответа", t.wait, "p-wait"],
-    ["Загрузка", t.download, "p-down"],
+    ["DNS", tm.dns, "p-dns"],
+    [t("Подключение", "Connect"), tm.connect, "p-tcp"],
+    ...(tm.tls != null ? ([["TLS", tm.tls, "p-tls"]] as [string, number, string][]) : []),
+    [t("Ожидание ответа", "Waiting"), tm.wait, "p-wait"],
+    [t("Загрузка", "Download"), tm.download, "p-down"],
   ];
-  const total = Math.max(t.total, phases.reduce((s, [, v]) => s + v, 0), 0.001);
+  const total = Math.max(tm.total, phases.reduce((s, [, v]) => s + v, 0), 0.001);
   let start = 0;
   return (
     <div className="scroll pad">
@@ -227,20 +230,20 @@ function TimingChart({ meta }: { meta: ResponseMeta }) {
           );
         })}
         <div className="timing-row total">
-          <span>Всего</span>
+          <span>{t("Всего", "Total")}</span>
           <span />
-          <span className="num mono">{ms(t.total)}</span>
+          <span className="num mono">{ms(tm.total)}</span>
         </div>
       </div>
       <table className="kv small">
         <tbody>
           <tr>
-            <td className="k">Адрес</td>
+            <td className="k">{t("Адрес", "URL")}</td>
             <td className="mono sel">{meta.url}</td>
           </tr>
           {!meta.via && (
             <tr>
-              <td className="k">Сервер</td>
+              <td className="k">{t("Сервер", "Server")}</td>
               <td className="mono sel">{meta.remoteAddr}</td>
             </tr>
           )}
@@ -250,19 +253,19 @@ function TimingChart({ meta }: { meta: ResponseMeta }) {
               <td className="mono">
                 {meta.tls.version}
                 {meta.tls.alpn ? ` · ${meta.tls.alpn}` : ""}
-                {meta.tls.clientCert ? ` · клиентский сертификат ${meta.tls.clientCert}` : ""}
+                {meta.tls.clientCert ? t(` · клиентский сертификат ${meta.tls.clientCert}`, ` · client certificate ${meta.tls.clientCert}`) : ""}
               </td>
             </tr>
           )}
           {meta.via && (
             <tr>
-              <td className="k">Прокси</td>
+              <td className="k">{t("Прокси", "Proxy")}</td>
               <td className="mono sel">{meta.via}</td>
             </tr>
           )}
           {meta.redirects.map((r, i) => (
             <tr key={i}>
-              <td className="k">{i === 0 ? "Перенаправления" : ""}</td>
+              <td className="k">{i === 0 ? t("Перенаправления", "Redirects") : ""}</td>
               <td className="mono sel">
                 {r.status} {r.url}
               </td>

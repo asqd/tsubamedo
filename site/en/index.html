@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TsubameDo — a lightweight REST API client</title>
+  <meta name="description" content="A free REST API client for macOS, Windows and Linux. Starts fast, opens responses of hundreds of megabytes, keeps collections in git. No sign-up.">
+  <meta name="color-scheme" content="light dark">
+  <meta property="og:title" content="TsubameDo">
+  <meta property="og:description" content="A lightweight REST API client: large responses, collections in git, no account.">
+  <meta property="og:image" content="../assets/og.png">
+  <link rel="alternate" hreflang="ru" href="https://asqd.github.io/tsubamedo/">
+  <link rel="alternate" hreflang="en" href="https://asqd.github.io/tsubamedo/en/">
+  <link rel="alternate" hreflang="x-default" href="https://asqd.github.io/tsubamedo/">
+  <link rel="icon" type="image/png" href="../assets/favicon-64.png">
+  <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="#">
+      <img src="../assets/icon-256.png" width="30" height="30" alt="">
+      <span>TsubameDo</span>
+    </a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#download">Download</a>
+      <a href="#install">Install</a>
+      <a href="#cli">CLI</a>
+      <a data-repo="" href="https://github.com/asqd/tsubamedo">GitHub</a>
+    </nav>
+    <div class="lang">
+      <a href="../" hreflang="ru" lang="ru" title="Русский">RU</a>
+      <span aria-hidden="true">·</span>
+      <span aria-current="page" title="English">EN</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <h1>A lightweight REST&nbsp;API client</h1>
+    <p class="lead">
+      Send requests, check responses, and keep collections in&nbsp;git next to your code.
+      The window opens in&nbsp;a&nbsp;second, and a&nbsp;response of hundreds of megabytes scrolls without lag.
+      No sign-up required.
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="#download">Download</a>
+      <a class="btn quiet" data-repo="" href="https://github.com/asqd/tsubamedo">Source code</a>
+    </div>
+    <p class="release faint small" id="release">Free, for macOS, Windows and Linux.</p>
+    <figure class="window">
+      <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+      <picture><source srcset="../assets/shots/en/hero-dark.png" media="(prefers-color-scheme: dark)"><img src="../assets/shots/en/hero-light.png" width="1360" height="820" alt="TsubameDo: the “Create order” request with a JSON body on the left, the 200 response and its checks on the right"></picture>
+    </figure>
+  </section>
+
+  <section class="numbers wrap">
+    <div><b>0.9&nbsp;s</b><span>from launch to a ready window</span></div>
+    <div><b>117&nbsp;MB</b><span>of memory at idle</span></div>
+    <div><b>0.2&nbsp;s</b><span>to format a&nbsp;263&nbsp;MB JSON</span></div>
+    <div><b>9&nbsp;MB</b><span>for the Mac installer</span></div>
+  </section>
+
+  <section class="wrap why">
+    <h2>Why another client</h2>
+    <p>
+      I got tired of Insomnia taking ages to start, freezing on large responses and asking me to create
+      an account just to send a request. I wanted an app that opens instantly, calmly shows JSON of hundreds
+      of megabytes and keeps everything in plain files. That’s how TsubameDo started.
+    </p>
+  </section>
+
+  <section id="features" class="wrap">
+    <h2>What it does</h2>
+    <div class="grid">
+      <article>
+        <h3>Collections in git</h3>
+        <p>Each request lives in its own TOML file. Saving rewrites only the lines you changed, so diffs stay clean. Passwords and tokens can go into <code>*.local.toml</code>, which stays out of&nbsp;git. Commit, pull and push right from the app.</p>
+      </article>
+      <article>
+        <h3>Large responses</h3>
+        <p>A response over 8&nbsp;MB goes to a&nbsp;temporary file instead of memory. A&nbsp;263&nbsp;MB JSON downloads in a&nbsp;quarter of a&nbsp;second and takes about 30&nbsp;MB. Search and JSONPath filters cover the whole response.</p>
+      </article>
+      <article>
+        <h3>Chains and checks</h3>
+        <p>The line <code>[capture] token = '$.token'</code> takes the token from a&nbsp;response, and other requests just use <code>{{token}}</code>. If there is no token yet, the login request runs on its own. Checks go one per line: <code>status == 200</code>.</p>
+      </article>
+      <article>
+        <h3>Postman scripts</h3>
+        <p>Run JavaScript before and after a&nbsp;request. Tests from Postman and Insomnia that use <code>pm.test</code>, <code>pm.expect</code> and <code>CryptoJS</code> work unchanged.</p>
+      </article>
+      <article>
+        <h3>Import</h3>
+        <p>Brings over collections and environments from Insomnia and Postman, and reads OpenAPI&nbsp;3, Swagger&nbsp;2 and HAR files from the browser. For a&nbsp;curl command, just paste it into the URL bar.</p>
+      </article>
+      <article>
+        <h3>Auth and networking</h3>
+        <p>OAuth&nbsp;2.0 with sign-in in the browser, Digest, AWS&nbsp;Signature&nbsp;v4, separate cookies for each environment. Works through the system proxy and SOCKS5, supports client certificates.</p>
+      </article>
+      <article>
+        <h3>Response diff</h3>
+        <p>Send a&nbsp;request to stage and prod and see how the responses differ. JSON is compared by content, not line by line, and every difference shows its path.</p>
+      </article>
+      <article>
+        <h3>Request as code</h3>
+        <p>Ready-to-run code for curl, Python, JavaScript, Go, Java, C#, PHP and a&nbsp;dozen more languages, with variables already filled in.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="wrap shots">
+    <figure class="window">
+      <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+      <picture><source srcset="../assets/shots/en/checks-dark.png" media="(prefers-color-scheme: dark)"><img src="../assets/shots/en/checks-light.png" width="1360" height="820" loading="lazy" alt="The Checks tab: four response checks, all passing"></picture>
+      <figcaption>Checks go one per line. A&nbsp;mistake in a&nbsp;condition shows up right away, before you send the request.</figcaption>
+    </figure>
+    <figure class="window">
+      <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+      <picture><source srcset="../assets/shots/en/compare-dark.png" media="(prefers-color-scheme: dark)"><img src="../assets/shots/en/compare-light.png" width="1360" height="820" loading="lazy" alt="Stage and prod responses compared: price changes, a new product, the version"></picture>
+      <figcaption>Stage and prod responses. Array items are matched by <code>id</code>, so a&nbsp;new product in the middle of the list doesn’t shift the rest.</figcaption>
+    </figure>
+    <figure class="window">
+      <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+      <picture><source srcset="../assets/shots/en/code-dark.png" media="(prefers-color-scheme: dark)"><img src="../assets/shots/en/code-light.png" width="1360" height="820" loading="lazy" alt="The Request code dialog: the request in Python with requests"></picture>
+      <figcaption>The same request in Python. JSON is passed as a&nbsp;dict, files as paths.</figcaption>
+    </figure>
+  </section>
+
+  <section id="download" class="wrap">
+    <h2>Download</h2>
+    <table class="files">
+      <tbody>
+        <tr><th>macOS 12+</th><td><a data-file="macos-apple-silicon.dmg" href="#">Apple Silicon (M1 and later)</a></td><td><a data-file="macos-intel.dmg" href="#">Intel</a></td></tr>
+        <tr><th>Windows 10, 11</th><td><a data-file="windows-x64-setup.exe" href="#">x64 installer</a></td><td></td></tr>
+        <tr><th>Linux</th><td><a data-file="linux-x86_64.AppImage" href="#">AppImage x86_64</a> · <a data-file="_amd64.deb" href="#">.deb</a></td><td><a data-file="linux-aarch64.AppImage" href="#">AppImage ARM64</a> · <a data-file="_arm64.deb" href="#">.deb</a></td></tr>
+        <tr><th>CLI</th><td colspan="2"><a data-file="tsubamedo-*-macos-apple-silicon.tar.gz" href="#">macOS Apple Silicon</a> · <a data-file="tsubamedo-*-macos-intel.tar.gz" href="#">macOS Intel</a> · <a data-file="windows-x64.zip" href="#">Windows</a> · <a data-file="tsubamedo-*-linux-x86_64.tar.gz" href="#">Linux x86_64</a> · <a data-file="tsubamedo-*-linux-aarch64.tar.gz" href="#">Linux ARM64</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="install" class="wrap">
+    <h2>Install</h2>
+    <p>
+      The app isn’t signed with Apple or Microsoft certificates, so on first launch
+      the system warns that it doesn’t know the developer. You only need to confirm once.
+    </p>
+
+    <div class="steps">
+      <article>
+        <h3>macOS</h3>
+        <ol>
+          <li>Open the DMG and drag TsubameDo to Applications.</li>
+          <li>Launch it. macOS will say it can’t verify the app. Click Done.</li>
+          <li>Open System Settings, go to Privacy &amp; Security, and click Open Anyway at the bottom.</li>
+        </ol>
+        <p class="small faint">On macOS 12–14 it’s simpler: right-click TsubameDo in Applications and choose Open.</p>
+        <p class="small faint">Or use Terminal: <code>xattr -dr com.apple.quarantine /Applications/TsubameDo.app</code></p>
+      </article>
+      <article>
+        <h3>Windows</h3>
+        <ol>
+          <li>Run the installer.</li>
+          <li>If you see “Windows protected your PC”, click More info, then Run anyway.</li>
+        </ol>
+        <p class="small faint">The window needs WebView2. Windows 10 and 11 usually have it; if not, the installer downloads it.</p>
+      </article>
+      <article>
+        <h3>Linux</h3>
+        <ol>
+          <li>AppImage: <code>chmod +x TsubameDo-*.AppImage</code> and run it.</li>
+          <li>Debian and Ubuntu package: <code>sudo apt install ./tsubamedo_*.deb</code></li>
+        </ol>
+        <p class="small faint">Requires WebKitGTK 4.1, which ships with Ubuntu 22.04, Debian 12, Fedora 38 and later.</p>
+      </article>
+    </div>
+
+    <h3 class="sub">Verify a download</h3>
+    <p>
+      Compute the checksum and compare it with the <code>.sha256</code> file on the release page.
+      On a&nbsp;Mac that’s <code>shasum -a 256 ~/Downloads/TsubameDo-*.dmg</code>, on Linux <code>sha256sum</code>,
+      on Windows <code>Get-FileHash</code>.
+    </p>
+  </section>
+
+  <section id="cli" class="wrap">
+    <h2>For the terminal and CI</h2>
+    <p>Run the same collections from the command line, with checks, chains and a&nbsp;JUnit report that GitLab, Jenkins and GitHub Actions understand. macOS doesn’t block a&nbsp;file downloaded with <code>curl</code>.</p>
+<pre class="code"><span class="faint"># Apple Silicon Mac. For Intel and Linux, take the archive name from the release page</span>
+curl -L <span class="repo-url">https://github.com/asqd/tsubamedo</span>/releases/latest/download/<span id="cli-name">tsubamedo-VERSION-macos-apple-silicon.tar.gz</span> | tar xz
+sudo mv tsubamedo /usr/local/bin/
+
+tsubamedo run -e stage --junit report.xml       <span class="faint"># whole collection, exit code for CI</span>
+tsubamedo compare orders/list -e stage --with prod
+tsubamedo code orders/create -l python-requests</pre>
+  </section>
+
+  <section class="wrap privacy">
+    <h2>No account</h2>
+    <p>
+      There’s nothing to sign up for, and the app sends nothing to the developer. Collections live in a&nbsp;folder
+      you choose; history, cookies and tokens stay on your computer. The only traffic is the requests you send.
+    </p>
+  </section>
+</main>
+
+<footer class="wrap foot small faint">
+  <span>Tsubame is Japanese for “swallow”, the bird.</span>
+  <a data-repo="" href="https://github.com/asqd/tsubamedo">GitHub</a>
+</footer>
+
+<script src="../site.js"></script>
+</body>
+</html>

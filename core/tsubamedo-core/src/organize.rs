@@ -21,7 +21,7 @@ pub fn clean_name(name: &str) -> Result<String> {
         cleaned = rest.trim_end().to_string();
     }
     if cleaned.is_empty() {
-        return Err(Error::Invalid("имя не может быть пустым".into()));
+        return Err(Error::Invalid(tr!("имя не может быть пустым", "the name cannot be empty")));
     }
     Ok(cleaned)
 }
@@ -30,7 +30,7 @@ pub fn clean_name(name: &str) -> Result<String> {
 fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
     let rel_path = Path::new(rel);
     if rel_path.components().any(|c| !matches!(c, Component::Normal(_))) {
-        return Err(Error::Invalid(format!("путь «{rel}» выходит за пределы коллекции")));
+        return Err(Error::Invalid(tr!("путь «{rel}» выходит за пределы коллекции", "the path \"{rel}\" leads outside the collection")));
     }
     Ok(root.join(rel_path))
 }
@@ -38,7 +38,7 @@ fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
 fn request_path(root: &Path, id: &str) -> Result<PathBuf> {
     let path = inside(root, &format!("{id}.toml"))?;
     if !path.is_file() {
-        return Err(Error::Invalid(format!("запроса {id} нет в коллекции")));
+        return Err(Error::Invalid(tr!("запроса {id} нет в коллекции", "request {id} is not in the collection")));
     }
     Ok(path)
 }
@@ -120,9 +120,9 @@ pub fn duplicate_request(root: &Path, id: &str) -> Result<String> {
     let path = request_path(root, id)?;
     let request = RequestFile::open(&path)?.request()?;
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let dest = free_path(path.parent().unwrap_or(root), &format!("{stem} копия"), ".toml", None);
+    let dest = free_path(path.parent().unwrap_or(root), &tr!("{stem} копия", "{stem} copy"), ".toml", None);
     fs::copy(&path, &dest).map_err(|e| Error::io(&dest, e))?;
-    let name = request.name.map(|n| format!("{n} (копия)"));
+    let name = request.name.map(|n| tr!("{n} (копия)", "{n} (copy)"));
     if name.is_some() {
         set_name(&dest, name)?;
     }
@@ -144,7 +144,7 @@ pub fn create_folder(root: &Path, parent: &str, name: &str) -> Result<String> {
 fn existing_folder(root: &Path, folder: &str) -> Result<PathBuf> {
     let path = folder_path(root, folder)?;
     if path == root || !path.is_dir() {
-        return Err(Error::Invalid(format!("папки «{folder}» нет в коллекции")));
+        return Err(Error::Invalid(tr!("папки «{folder}» нет в коллекции", "folder \"{folder}\" is not in the collection")));
     }
     Ok(path)
 }
@@ -164,7 +164,7 @@ pub fn move_folder(root: &Path, folder: &str, parent: &str) -> Result<String> {
     let path = existing_folder(root, folder)?;
     let dir = folder_path(root, parent)?;
     if dir.starts_with(&path) {
-        return Err(Error::Invalid("папку нельзя перенести в неё саму".into()));
+        return Err(Error::Invalid(tr!("папку нельзя перенести в неё саму", "a folder cannot be moved into itself")));
     }
     if path.parent() == Some(dir.as_path()) {
         return Ok(folder.to_string());
@@ -182,7 +182,7 @@ pub fn delete_folder(root: &Path, folder: &str) -> Result<()> {
 
 #[cfg(not(test))]
 fn to_trash(path: &Path) -> Result<()> {
-    trash::delete(path).map_err(|e| Error::Invalid(format!("не удалось переместить {} в Корзину: {e}", path.display())))
+    trash::delete(path).map_err(|e| Error::Invalid(tr!("не удалось переместить {} в Корзину: {e}", "could not move {} to the Trash: {e}", path.display())))
 }
 
 // Tests must not fill the developer's Trash.
@@ -237,6 +237,9 @@ mod tests {
         assert_eq!(move_request(root, "orders/create", "").unwrap(), "create");
         assert_eq!(ids(root), ["create", "orders/create копия"]);
         delete_request(root, "create").unwrap();
+        let english = crate::lang::in_language(true, || duplicate_request(root, "orders/create копия").unwrap());
+        assert_eq!(english, "orders/create копия copy");
+        delete_request(root, &english).unwrap();
         assert_eq!(ids(root), ["orders/create копия"]);
     }
 
@@ -252,6 +255,8 @@ mod tests {
         assert_eq!(ids(root), ["Заказы/create"]);
         assert_eq!(move_folder(root, "Заказы", "Туры").unwrap(), "Туры/Заказы");
         assert!(move_folder(root, "Туры", "Туры/Поиск").is_err());
+        let english = crate::lang::in_language(true, || move_folder(root, "Туры", "Туры/Поиск").unwrap_err().to_string());
+        assert_eq!(english, "a folder cannot be moved into itself");
         assert_eq!(Collection::open(root).unwrap().folders, ["env 2", "Туры", "Туры/Заказы", "Туры/Поиск", "Туры 2"]);
         delete_folder(root, "Туры").unwrap();
         assert!(ids(root).is_empty());

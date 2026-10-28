@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, HistoryItem } from "../api";
 import { ms, size, statusTone } from "../format";
+import { lang, t } from "../i18n";
 import { ContextMenu } from "./ContextMenu";
 
 function day(at: number): string {
@@ -10,12 +11,14 @@ function day(at: number): string {
   const today = new Date();
   const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((start(today) - start(d)) / 86_400_000);
-  if (diff === 0) return "Сегодня";
-  if (diff === 1) return "Вчера";
-  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+  if (diff === 0) return t("Сегодня", "Today");
+  if (diff === 1) return t("Вчера", "Yesterday");
+  return d.toLocaleDateString(locale(), { day: "numeric", month: "long", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
 }
 
-const time = (at: number) => new Date(at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+const locale = () => (lang() === "en" ? "en-US" : "ru-RU");
+
+const time = (at: number) => new Date(at).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit", hour12: false });
 
 export function HistoryList({
   version,
@@ -55,16 +58,16 @@ export function HistoryList({
   return (
     <div className="history">
       <div className="history-head small">
-        <label className="muted" title={currentId ? undefined : "Откройте запрос из коллекции"}>
-          <input type="checkbox" checked={onlyThis} disabled={!currentId} onChange={(e) => setOnlyThis(e.target.checked)} /> только этот запрос
+        <label className="muted" title={currentId ? undefined : t("Откройте запрос из коллекции", "Open a request from the collection")}>
+          <input type="checkbox" checked={onlyThis} disabled={!currentId} onChange={(e) => setOnlyThis(e.target.checked)} /> {t("только этот запрос", "only this request")}
         </label>
         <span className="sp" />
-        <button className="icon" title="Очистить историю" disabled={!items?.length} onClick={(e) => setMenu({ x: e.clientX, y: e.clientY })}>
+        <button className="icon" title={t("Очистить историю", "Clear history")} disabled={!items?.length} onClick={(e) => setMenu({ x: e.clientX, y: e.clientY })}>
           ⌫
         </button>
       </div>
       {error && <div className="side-empty small bad-text">{error}</div>}
-      {items && shown.length === 0 && <div className="side-empty small faint">{f ? "Ничего не нашлось" : "Здесь появятся отправленные запросы"}</div>}
+      {items && shown.length === 0 && <div className="side-empty small faint">{f ? t("Ничего не нашлось", "Nothing found") : t("Здесь появятся отправленные запросы", "Sent requests will appear here")}</div>}
       <div className="history-list">
         {shown.map((h) => {
           const d = day(h.at);
@@ -73,7 +76,7 @@ export function HistoryList({
           return (
             <div key={h.id}>
               {header}
-              <button className="item hist" onClick={() => onOpen(h.id)} title={`${h.method} ${h.url}${h.env ? `\nокружение: ${h.env}` : ""}${h.hasBody ? "" : "\nтело ответа не сохранено"}`}>
+              <button className="item hist" onClick={() => onOpen(h.id)} title={`${h.method} ${h.url}${h.env ? t(`\nокружение: ${h.env}`, `\nenvironment: ${h.env}`) : ""}${h.hasBody ? "" : t("\nтело ответа не сохранено", "\nresponse body not kept")}`}>
                 <span className="faint small num hist-time">{time(h.at)}</span>
                 <span className={`m m-${h.method.toLowerCase()}`}>{h.method === "DELETE" ? "DEL" : h.method.slice(0, 4)}</span>
                 <span className="ell hist-name">{h.name || h.url.replace(/^\{\{[^}]+\}\}|^https?:\/\/[^/]+/, "") || h.url}</span>
@@ -81,7 +84,7 @@ export function HistoryList({
                   <span className={`hist-status ${statusTone(h.status)}`}>{h.status}</span>
                 ) : (
                   <span className="hist-status bad" title={h.error ?? ""}>
-                    ошибка
+                    {t("ошибка", "error")}
                   </span>
                 )}
                 <span className="faint small num hist-meta">
@@ -100,9 +103,12 @@ export function HistoryList({
           onClose={() => setMenu(null)}
           items={[
             {
-              label: "Очистить историю",
+              label: t("Очистить историю", "Clear history"),
               danger: true,
-              confirm: "Удалить всю историю этой коллекции вместе с сохранёнными ответами, значениями из них ({{token}} и подобными), cookie и токенами OAuth 2.0?",
+              confirm: t(
+                "Удалить всю историю этой коллекции вместе с сохранёнными ответами, значениями из них ({{token}} и подобными), cookie и токенами OAuth 2.0?",
+                "Delete this collection's whole history, with the kept responses, the values taken from them ({{token}} and the like), cookies and OAuth 2.0 tokens?",
+              ),
               onClick: () => api.clearHistory().then(() => setCleared((c) => c + 1)),
             },
           ]}

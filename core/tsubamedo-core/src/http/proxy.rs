@@ -44,14 +44,24 @@ impl Proxy {
     pub fn parse(text: &str) -> Result<Proxy, String> {
         let text = text.trim();
         let with_scheme = if text.contains("://") { text.to_string() } else { format!("http://{text}") };
-        let url = Url::parse(&with_scheme).map_err(|e| format!("адрес прокси «{text}»: {e}"))?;
+        let url = Url::parse(&with_scheme).map_err(|e| tr!("адрес прокси «{text}»: {e}", "proxy address \"{text}\": {e}"))?;
         let socks = match url.scheme() {
             "http" => false,
             "socks5" | "socks5h" | "socks" => true,
-            "https" => return Err(format!("прокси «{text}»: TLS до самого прокси (https://) не поддерживается, нужен http:// или socks5://")),
-            other => return Err(format!("прокси «{text}»: схема {other} не поддерживается, нужен http:// или socks5://")),
+            "https" => {
+                return Err(tr!(
+                    "прокси «{text}»: TLS до самого прокси (https://) не поддерживается, нужен http:// или socks5://",
+                    "proxy \"{text}\": TLS to the proxy itself (https://) is not supported, use http:// or socks5://"
+                ));
+            }
+            other => {
+                return Err(tr!(
+                    "прокси «{text}»: схема {other} не поддерживается, нужен http:// или socks5://",
+                    "proxy \"{text}\": scheme {other} is not supported, use http:// or socks5://"
+                ));
+            }
         };
-        let host = url.host_str().filter(|h| !h.is_empty()).ok_or_else(|| format!("прокси «{text}»: нет имени сервера"))?;
+        let host = url.host_str().filter(|h| !h.is_empty()).ok_or_else(|| tr!("прокси «{text}»: нет имени сервера", "proxy \"{text}\": no host name"))?;
         let decode = |s: &str| percent_decode(s);
         let auth = (!url.username().is_empty()).then(|| (decode(url.username()), decode(url.password().unwrap_or_default())));
         Ok(Proxy {
@@ -157,7 +167,7 @@ fn from_env() -> Option<SystemProxy> {
     let socks = all.as_ref().filter(|a| a.starts_with("socks")).cloned();
     let all = all.filter(|a| !a.starts_with("socks"));
     Some(SystemProxy {
-        source: "переменные окружения".into(),
+        source: tr!("переменные окружения", "environment variables"),
         http: http.or(all.clone()),
         https: https.or(all),
         socks,
@@ -218,7 +228,7 @@ fn parse_scutil(text: &str) -> SystemProxy {
         pac: on("ProxyAutoConfigEnable").then(|| fields.get("ProxyAutoConfigURLString").cloned().unwrap_or_default()),
     };
     let any = found.http.is_some() || found.https.is_some() || found.socks.is_some() || found.pac.is_some();
-    SystemProxy { source: if any { "настройки macOS".into() } else { String::new() }, ..found }
+    SystemProxy { source: if any { tr!("настройки macOS", "macOS settings") } else { String::new() }, ..found }
 }
 
 fn is_loopback(url: &Url) -> bool {
@@ -284,7 +294,7 @@ pub(crate) async fn tunnel(stream: &mut TcpStream, authority: &str, proxy: &Prox
     // Byte by byte: nothing after the head may be taken from the tunnel.
     while !answer.ends_with(b"\r\n\r\n") {
         if answer.len() > 16 << 10 || stream.read(&mut byte).await.map_err(|e| e.to_string())? == 0 {
-            return Err("прокси закрыл соединение, не ответив на CONNECT".into());
+            return Err(tr!("прокси закрыл соединение, не ответив на CONNECT", "the proxy closed the connection without answering CONNECT"));
         }
         answer.push(byte[0]);
     }
@@ -293,9 +303,12 @@ pub(crate) async fn tunnel(stream: &mut TcpStream, authority: &str, proxy: &Prox
     let status: u16 = status_line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
     match status {
         200..=299 => Ok(()),
-        407 if proxy.auth.is_none() => Err("прокси требует вход (407): укажите логин и пароль — http://логин:пароль@прокси:порт".into()),
-        407 => Err("прокси не принял логин и пароль (407)".into()),
-        _ => Err(format!("прокси не открыл туннель к {authority}: {}", status_line.trim())),
+        407 if proxy.auth.is_none() => Err(tr!(
+            "прокси требует вход (407): укажите логин и пароль — http://логин:пароль@прокси:порт",
+            "the proxy wants a sign-in (407): give a user and password — http://user:password@proxy:port"
+        )),
+        407 => Err(tr!("прокси не принял логин и пароль (407)", "the proxy did not accept the user and password (407)")),
+        _ => Err(tr!("прокси не открыл туннель к {authority}: {}", "the proxy did not open a tunnel to {authority}: {}", status_line.trim())),
     }
 }
 
@@ -317,11 +330,13 @@ pub(crate) async fn socks5(stream: &mut TcpStream, host: &str, port: u16, proxy:
             let mut ok = [0u8; 2];
             stream.read_exact(&mut ok).await.map_err(io)?;
             if ok[1] != 0 {
-                return Err("SOCKS-прокси не принял логин и пароль".into());
+                return Err(tr!("SOCKS-прокси не принял логин и пароль", "the SOCKS proxy did not accept the user and password"));
             }
         }
-        ([5, 0xff], _) | ([5, 2], None) => return Err("SOCKS-прокси требует вход: socks5://логин:пароль@прокси:порт".into()),
-        _ => return Err("это не SOCKS5-прокси".into()),
+        ([5, 0xff], _) | ([5, 2], None) => {
+            return Err(tr!("SOCKS-прокси требует вход: socks5://логин:пароль@прокси:порт", "the SOCKS proxy wants a sign-in: socks5://user:password@proxy:port"));
+        }
+        _ => return Err(tr!("это не SOCKS5-прокси", "this is not a SOCKS5 proxy")),
     }
     let host = host.trim_start_matches('[').trim_end_matches(']');
     let mut request = vec![5, 1, 0];
@@ -345,14 +360,14 @@ pub(crate) async fn socks5(stream: &mut TcpStream, host: &str, port: u16, proxy:
     stream.read_exact(&mut head).await.map_err(io)?;
     if head[1] != 0 {
         let why = match head[1] {
-            2 => "правила прокси не разрешают",
-            3 => "сеть недоступна",
-            4 => "сервер недоступен",
-            5 => "в соединении отказано",
-            6 => "истёк срок",
-            _ => "ошибка",
+            2 => tr_static!("правила прокси не разрешают", "not allowed by the proxy's rules"),
+            3 => tr_static!("сеть недоступна", "network unreachable"),
+            4 => tr_static!("сервер недоступен", "host unreachable"),
+            5 => tr_static!("в соединении отказано", "connection refused"),
+            6 => tr_static!("истёк срок", "timed out"),
+            _ => tr_static!("ошибка", "error"),
         };
-        return Err(format!("SOCKS-прокси не подключился к {host}:{port}: {why}"));
+        return Err(tr!("SOCKS-прокси не подключился к {host}:{port}: {why}", "the SOCKS proxy could not connect to {host}:{port}: {why}"));
     }
     let rest = match head[3] {
         1 => 4 + 2,
@@ -362,7 +377,7 @@ pub(crate) async fn socks5(stream: &mut TcpStream, host: &str, port: u16, proxy:
             stream.read_exact(&mut len).await.map_err(io)?;
             len[0] as usize + 2
         }
-        _ => return Err("непонятный ответ SOCKS-прокси".into()),
+        _ => return Err(tr!("непонятный ответ SOCKS-прокси", "unexpected answer from the SOCKS proxy")),
     };
     let mut skip = vec![0u8; rest];
     stream.read_exact(&mut skip).await.map_err(io)?;
@@ -385,6 +400,8 @@ mod tests {
         assert_eq!(p.label(), "10.0.0.1:8080");
         assert!(Proxy::parse("socks5h://gw").unwrap().socks);
         assert!(Proxy::parse("https://proxy:443").is_err());
+        let english = crate::lang::in_language(true, || Proxy::parse("ftp://proxy:21").unwrap_err());
+        assert_eq!(english, "proxy \"ftp://proxy:21\": scheme ftp is not supported, use http:// or socks5://");
     }
 
     #[test]

@@ -4,6 +4,10 @@
 (() => {
   const input = JSON.parse(globalThis.__input);
   delete globalThis.__input;
+  // The text in the language of the app: `t("ожидалось", "expected")`. compat.js takes it from
+  // `__t` and removes it, so the user's script never sees it.
+  const t = (ru, en) => (input.english ? en : ru);
+  Object.defineProperty(globalThis, "__t", { value: t, configurable: true });
   const out = { vars: {}, tests: [], logs: [], request: input.request };
   const native = { hash: globalThis.__hash, hmac: globalThis.__hmac, b64: globalThis.__b64, uuid: globalThis.__uuid };
   for (const name of ["__hash", "__hmac", "__b64", "__uuid"]) delete globalThis[name];
@@ -12,7 +16,7 @@
   const show = (v) => {
     if (typeof v === "string") return v;
     if (v === undefined) return "undefined";
-    if (typeof v === "function") return "функция";
+    if (typeof v === "function") return t("функция", "function");
     if (v instanceof Error) return `${v.name}: ${v.message}`;
     try {
       return JSON.stringify(v) ?? String(v);
@@ -116,7 +120,9 @@
   const pairs = (list, ignoreCase, readonly, what) => {
     const same = (a, b) => (ignoreCase ? a.toLowerCase() === b.toLowerCase() : a === b);
     const guard = () => {
-      if (readonly) throw new Error(`${what} уже отправлены — менять их можно в скрипте до запроса`);
+      if (readonly) {
+        throw new Error(t(`${what} уже отправлены — менять их можно в скрипте до запроса`, `${what} are already sent — change them in the script before the request`));
+      }
     };
     return Object.freeze({
       get(name) {
@@ -147,7 +153,7 @@
   const r = out.request;
   const sent = Boolean(input.response);
   const fixed = (what) => {
-    if (sent) throw new Error(`${what}: запрос уже отправлен — менять его можно в скрипте до запроса`);
+    if (sent) throw new Error(t(`${what}: запрос уже отправлен — менять его можно в скрипте до запроса`, `${what}: the request is already sent — change it in the script before the request`));
   };
   globalThis.request = Object.freeze({
     get method() {
@@ -164,14 +170,14 @@
       fixed("url");
       r.url = String(v);
     },
-    headers: pairs(r.headers, true, sent, "Заголовки"),
-    query: pairs(r.query, false, sent, "Параметры"),
+    headers: pairs(r.headers, true, sent, t("Заголовки", "Headers")),
+    query: pairs(r.query, false, sent, t("Параметры", "Params")),
     get body() {
       return r.body;
     },
     set body(v) {
       fixed("body");
-      if (r.body === null) throw new Error("менять можно только тело JSON или текст");
+      if (r.body === null) throw new Error(t("менять можно только тело JSON или текст", "only a JSON or text body can be changed"));
       r.body = typeof v === "string" ? v : JSON.stringify(v, null, 2);
     },
   });
@@ -183,7 +189,7 @@
       statusText: res.reason,
       time: res.time,
       size: res.size,
-      headers: pairs(res.headers, true, true, "Заголовки ответа"),
+      headers: pairs(res.headers, true, true, t("Заголовки ответа", "Response headers")),
       cookies: cookieList(setCookies(res.headers)),
       text() {
         if (res.body === null) throw new Error(res.bodyError);
@@ -193,7 +199,7 @@
         try {
           return JSON.parse(this.text());
         } catch (e) {
-          throw new Error(`ответ не JSON: ${e.message}`);
+          throw new Error(t(`ответ не JSON: ${e.message}`, `the response is not JSON: ${e.message}`));
         }
       },
     });
@@ -211,10 +217,12 @@
   const lengthOf = (v) => (v != null && typeof v.length === "number" ? v.length : undefined);
   const matchers = (actual, not) => {
     const check = (pass, wanted) => {
-      if (Boolean(pass) === not) throw new Error(`${not ? "не " : ""}ожидалось ${wanted}, пришло ${quoted(actual)}`);
+      if (Boolean(pass) === not) {
+        throw new Error(t(`${not ? "не " : ""}ожидалось ${wanted}, пришло ${quoted(actual)}`, `expected ${not ? "not " : ""}${wanted}, got ${quoted(actual)}`));
+      }
     };
     const number = (n) => {
-      if (typeof actual !== "number") throw new Error(`ожидалось число, пришло ${quoted(actual)}`);
+      if (typeof actual !== "number") throw new Error(t(`ожидалось число, пришло ${quoted(actual)}`, `expected a number, got ${quoted(actual)}`));
       return Number(n);
     };
     return {
@@ -223,26 +231,26 @@
       },
       toBe: (e) => check(Object.is(actual, e), quoted(e)),
       toEqual: (e) => check(deepEqual(actual, e), quoted(e)),
-      toBeTruthy: () => check(actual, "истинное значение"),
-      toBeFalsy: () => check(!actual, "ложное значение"),
-      toBeDefined: () => check(actual !== undefined, "значение"),
+      toBeTruthy: () => check(actual, t("истинное значение", "a truthy value")),
+      toBeFalsy: () => check(!actual, t("ложное значение", "a falsy value")),
+      toBeDefined: () => check(actual !== undefined, t("значение", "a value")),
       toBeUndefined: () => check(actual === undefined, "undefined"),
       toBeNull: () => check(actual === null, "null"),
-      toBeGreaterThan: (n) => check(actual > number(n), `больше ${n}`),
-      toBeGreaterThanOrEqual: (n) => check(actual >= number(n), `не меньше ${n}`),
-      toBeLessThan: (n) => check(actual < number(n), `меньше ${n}`),
-      toBeLessThanOrEqual: (n) => check(actual <= number(n), `не больше ${n}`),
+      toBeGreaterThan: (n) => check(actual > number(n), t(`больше ${n}`, `more than ${n}`)),
+      toBeGreaterThanOrEqual: (n) => check(actual >= number(n), t(`не меньше ${n}`, `at least ${n}`)),
+      toBeLessThan: (n) => check(actual < number(n), t(`меньше ${n}`, `less than ${n}`)),
+      toBeLessThanOrEqual: (n) => check(actual <= number(n), t(`не больше ${n}`, `at most ${n}`)),
       toContain: (e) =>
         check(
           typeof actual === "string" ? actual.includes(String(e)) : Array.isArray(actual) && actual.some((x) => deepEqual(x, e)),
-          `что-то с ${quoted(e)}`,
+          t(`что-то с ${quoted(e)}`, `something with ${quoted(e)}`),
         ),
-      toMatch: (re) => check(typeof actual === "string" && (re instanceof RegExp ? re : new RegExp(re)).test(actual), `совпадение с ${re}`),
-      toHaveLength: (n) => check(lengthOf(actual) === n, `длину ${n}`),
+      toMatch: (re) => check(typeof actual === "string" && (re instanceof RegExp ? re : new RegExp(re)).test(actual), t(`совпадение с ${re}`, `a match for ${re}`)),
+      toHaveLength: (n) => check(lengthOf(actual) === n, t(`длину ${n}`, `length ${n}`)),
       toHaveProperty: (path) => {
         let v = actual;
         for (const key of String(path).split(".")) v = v != null && own(Object(v), key) ? v[key] : undefined;
-        check(v !== undefined, `поле ${path}`);
+        check(v !== undefined, t(`поле ${path}`, `property ${path}`));
       },
     };
   };
@@ -250,7 +258,7 @@
   globalThis.test = (name, fn) => {
     try {
       const result = fn();
-      if (result && typeof result.then === "function") throw new Error("асинхронные тесты не поддерживаются");
+      if (result && typeof result.then === "function") throw new Error(t("асинхронные тесты не поддерживаются", "async tests are not supported"));
       out.tests.push({ name: String(name), ok: true, error: null });
     } catch (e) {
       out.tests.push({ name: String(name), ok: false, error: e instanceof Error ? e.message : show(e) });

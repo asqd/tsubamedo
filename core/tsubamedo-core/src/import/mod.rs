@@ -46,8 +46,8 @@ impl Format {
     pub fn title(self) -> &'static str {
         match self {
             Format::Insomnia => "Insomnia",
-            Format::Postman => "коллекция Postman",
-            Format::PostmanEnvironment => "окружение Postman",
+            Format::Postman => tr_static!("коллекция Postman", "Postman collection"),
+            Format::PostmanEnvironment => tr_static!("окружение Postman", "Postman environment"),
             Format::OpenApi => "OpenAPI",
             Format::Swagger => "Swagger 2",
             Format::Har => "HAR",
@@ -122,7 +122,7 @@ pub struct Written {
 pub fn read(path: &Path) -> Result<Imported> {
     let size = fs::metadata(path).map_err(|e| Error::io(path, e))?.len();
     if size > SIZE_LIMIT {
-        return Err(Error::Invalid(format!("{}: файл больше {} МБ — это не коллекция", path.display(), SIZE_LIMIT >> 20)));
+        return Err(Error::Invalid(tr!("{}: файл больше {} МБ — это не коллекция", "{}: the file is over {} MB — not a collection", path.display(), SIZE_LIMIT >> 20)));
     }
     let text = fs::read_to_string(path).map_err(|e| Error::io(path, e))?;
     let mut imported = parse_from(&text, Some(path)).map_err(|e| match e {
@@ -130,7 +130,7 @@ pub fn read(path: &Path) -> Result<Imported> {
         e => e,
     })?;
     if imported.name.trim().is_empty() {
-        imported.name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Импорт".into());
+        imported.name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| tr!("Импорт", "Import"));
     }
     Ok(imported)
 }
@@ -144,9 +144,9 @@ pub fn parse(text: &str) -> Result<Imported> {
 fn parse_from(text: &str, file: Option<&Path>) -> Result<Imported> {
     let text = text.trim_start_matches('\u{feff}');
     let mut doc: Value = if text.trim_start().starts_with(['{', '[']) {
-        serde_json::from_str(text).map_err(|e| Error::Invalid(format!("не JSON: {e}")))?
+        serde_json::from_str(text).map_err(|e| Error::Invalid(tr!("не JSON: {e}", "not JSON: {e}")))?
     } else {
-        serde_yaml_ng::from_str(text).map_err(|e| Error::Invalid(format!("ни JSON, ни YAML: {e}")))?
+        serde_yaml_ng::from_str(text).map_err(|e| Error::Invalid(tr!("ни JSON, ни YAML: {e}", "neither JSON nor YAML: {e}")))?
     };
     let s = |key: &str| doc.get(key).and_then(Value::as_str).unwrap_or_default();
     let mut imported = if s("_type") == "export" {
@@ -165,9 +165,10 @@ fn parse_from(text: &str, file: Option<&Path>) -> Result<Imported> {
     } else if doc.pointer("/log/entries").is_some() {
         har::har(&doc)?
     } else {
-        return Err(Error::Invalid(
-            "не похоже ни на экспорт Insomnia, ни на коллекцию или окружение Postman, ни на OpenAPI, Swagger или HAR".into(),
-        ));
+        return Err(Error::Invalid(tr!(
+            "не похоже ни на экспорт Insomnia, ни на коллекцию или окружение Postman, ни на OpenAPI, Swagger или HAR",
+            "does not look like an Insomnia export, a Postman collection or environment, OpenAPI, Swagger or HAR"
+        )));
     };
     for item in &mut imported.requests {
         tidy(&mut item.request);
@@ -182,7 +183,7 @@ fn parse_from(text: &str, file: Option<&Path>) -> Result<Imported> {
 pub fn write(imported: &Imported, dir: &Path) -> Result<Written> {
     let existing = dir.join(MANIFEST).is_file();
     let (root, base) = if existing {
-        let folder = free_path(dir, &clean_name(&imported.name).unwrap_or_else(|_| "Импорт".into()), "", None);
+        let folder = free_path(dir, &clean_name(&imported.name).unwrap_or_else(|_| tr!("Импорт", "Import")), "", None);
         (dir.to_path_buf(), folder)
     } else {
         fs::create_dir_all(dir).map_err(|e| Error::io(dir, e))?;
@@ -198,8 +199,8 @@ pub fn write(imported: &Imported, dir: &Path) -> Result<Written> {
 
     let mut kept = Vec::new();
     let (shared, secret): (Vec<&Var>, Vec<&Var>) = imported.vars.iter().partition(|v| !v.secret);
-    add_vars(&root.join(MANIFEST), &shared, &mut kept, "коллекция")?;
-    add_vars(&root.join("tsubamedo.local.toml"), &secret, &mut kept, "коллекция, секрет")?;
+    add_vars(&root.join(MANIFEST), &shared, &mut kept, &tr!("коллекция", "collection"))?;
+    add_vars(&root.join("tsubamedo.local.toml"), &secret, &mut kept, &tr!("коллекция, секрет", "collection, secret"))?;
     let mut environments = Vec::new();
     let known = crate::collection::Collection::open(&root).map(|c| c.environments()).unwrap_or_default();
     for env in &imported.environments {
@@ -214,7 +215,7 @@ pub fn write(imported: &Imported, dir: &Path) -> Result<Written> {
             write_doc(&file, &"[vars]\n".parse().expect("valid TOML"))?;
         }
         add_vars(&file, &shared, &mut kept, &name)?;
-        add_vars(&env_dir.join(format!("{name}.local.toml")), &secret, &mut kept, &format!("{name}, секрет"))?;
+        add_vars(&env_dir.join(format!("{name}.local.toml")), &secret, &mut kept, &tr!("{name}, секрет", "{name}, secret"))?;
         environments.push(name);
     }
 
@@ -237,7 +238,7 @@ pub fn write(imported: &Imported, dir: &Path) -> Result<Written> {
             dir.push(file_name(part));
         }
         fs::create_dir_all(&dir).map_err(|e| Error::io(&dir, e))?;
-        let names: Vec<String> = requests.iter().map(|r| file_name(r.name.as_deref().unwrap_or("Запрос"))).collect();
+        let names: Vec<String> = requests.iter().map(|r| file_name(r.name.as_deref().unwrap_or(tr_static!("Запрос", "Request")))).collect();
         let mut sorted = names.clone();
         sorted.sort_by_key(|n| n.to_lowercase());
         let numbered = imported.format != Format::OpenApi && imported.format != Format::Swagger && names != sorted;
@@ -264,7 +265,7 @@ pub(crate) fn file_name(name: &str) -> String {
     let spaced: String = name.chars().map(|c| if c == '/' || c == '\\' { ' ' } else { c }).collect();
     let spaced = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
     let short: String = spaced.chars().take(80).collect();
-    clean_name(&short).unwrap_or_else(|_| "Запрос".into())
+    clean_name(&short).unwrap_or_else(|_| tr!("Запрос", "Request"))
 }
 
 /// Adds the variables the file does not have yet; `kept` gets those it has with another value.
@@ -277,11 +278,11 @@ fn add_vars(path: &Path, vars: &[&Var], kept: &mut Vec<String>, place: &str) -> 
         Err(_) => DocumentMut::new(),
     };
     if path.file_name().is_some_and(|n| n.to_string_lossy().ends_with(".local.toml")) && doc.is_empty() {
-        doc.decor_mut().set_prefix("# Секреты: этот файл не попадает в git.\n");
+        doc.decor_mut().set_prefix(tr_static!("# Секреты: этот файл не попадает в git.\n", "# Secrets: this file stays out of git.\n"));
     }
     let table = doc.entry("vars").or_insert_with(|| Item::Table(Table::new()));
     let Some(table) = table.as_table_like_mut() else {
-        return Err(Error::Parse { path: path.to_path_buf(), message: "vars должен быть таблицей".into() });
+        return Err(Error::Parse { path: path.to_path_buf(), message: tr!("vars должен быть таблицей", "vars must be a table") });
     };
     for var in vars {
         match table.get(&var.name).and_then(|i| i.as_str()) {
@@ -324,8 +325,9 @@ fn settle_vars(imported: &mut Imported) {
     let defined: BTreeSet<&String> = imported.vars.iter().chain(imported.environments.iter().flat_map(|e| &e.vars)).map(|v| &v.name).collect();
     let missing: Vec<&str> = used.iter().filter(|n| !defined.contains(n) && !produced.contains(*n)).map(String::as_str).collect();
     if !missing.is_empty() {
-        imported.warnings.push(format!(
+        imported.warnings.push(tr!(
             "не заданы переменные: {} — впишите их в tsubamedo.toml или окружение, секреты — в *.local.toml",
+            "variables not set: {} — add them to tsubamedo.toml or an environment, secrets to *.local.toml",
             missing.join(", ")
         ));
     }
@@ -505,7 +507,10 @@ fn map_builtins(text: &str, warnings: &mut Vec<String>) -> String {
             Some(ours) => out.push_str(&ours),
             None => {
                 if name.starts_with('$') && !name.starts_with("$env.") {
-                    warnings.push(format!("встроенной переменной {{{{{name}}}}} у нас нет — она осталась как есть"));
+                    warnings.push(tr!(
+                        "встроенной переменной {{{{{name}}}}} у нас нет — она осталась как есть",
+                        "there is no built-in variable {{{{{name}}}}} here — it was left as is"
+                    ));
                 }
                 out.push_str(&rest[open..open + 2 + close + 2]);
             }
@@ -516,15 +521,35 @@ fn map_builtins(text: &str, warnings: &mut Vec<String>) -> String {
     out
 }
 
+/// What the request's own part of joined scripts is called (a `// …` line above it).
+pub(super) fn request_scripts() -> &'static str {
+    tr_static!("запроса", "request")
+}
+
 /// Scripts of a folder and of the request, in the order the other tool runs them.
 fn join_scripts(parts: &[(String, &str)]) -> String {
     let parts: Vec<&(String, &str)> = parts.iter().filter(|(_, s)| !s.trim().is_empty()).collect();
     match parts.as_slice() {
         [] => String::new(),
-        [(from, only)] if from == "запроса" => format!("{}\n", only.trim_end()),
+        [(from, only)] if from == request_scripts() => format!("{}\n", only.trim_end()),
         many => many.iter().map(|(from, s)| format!("// {from}\n{}\n", s.trim_end())).collect::<Vec<_>>().join("\n"),
     }
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod english {
+    #[test]
+    fn says_why_in_english() {
+        crate::lang::in_language(true, || {
+            let unknown = super::parse("{\"hello\": 1}").unwrap_err().to_string();
+            assert!(unknown.starts_with("does not look like an Insomnia export"), "{unknown}");
+            assert!(super::parse("{\"hello\": ").unwrap_err().to_string().starts_with("not JSON: "));
+            let postman = r#"{"info": {"name": "x"}, "item": [{"name": "a", "request": {"method": "GET", "url": "{{host}}/a"}}]}"#;
+            let warnings = super::parse(postman).unwrap().warnings;
+            assert!(warnings.iter().any(|w| w.starts_with("variables not set: host — add them")), "{warnings:?}");
+        });
+    }
+}

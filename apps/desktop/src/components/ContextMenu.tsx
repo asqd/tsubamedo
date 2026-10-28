@@ -1,6 +1,7 @@
 // A right-click menu drawn by the page: native menus cannot be built from the web view here,
 // and this one also asks "Точно?" in place before anything goes to the Trash.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 
 export interface MenuItem {
   label: string;
@@ -58,9 +59,9 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
             <div className="small">{item.confirm}</div>
             <div className="menu-ask-row">
               <button className="danger" autoFocus onClick={() => run(item)}>
-                Да
+                {t("Да", "Yes")}
               </button>
-              <button onClick={() => setAsking(null)}>Нет</button>
+              <button onClick={() => setAsking(null)}>{t("Нет", "No")}</button>
             </div>
           </div>
         ) : (

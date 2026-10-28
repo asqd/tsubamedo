@@ -114,7 +114,7 @@ impl Bundler {
     /// schema elsewhere becomes a component, anything else elsewhere is put in its place.
     fn reference(&mut self, v: &mut Value, r: &str, base: &Path, kind: Kind, depth: usize) {
         if r.starts_with("http://") || r.starts_with("https://") {
-            self.warnings.push(format!("ссылки по сети не загружаются: {r}"));
+            self.warnings.push(tr!("ссылки по сети не загружаются: {r}", "references over the network are not loaded: {r}"));
             return;
         }
         let (file, pointer) = r.split_once('#').unwrap_or((r, ""));
@@ -125,7 +125,7 @@ impl Bundler {
             match fs::canonicalize(&path) {
                 Ok(path) => path,
                 Err(e) => {
-                    self.warnings.push(format!("ссылка {r}: не открыть {}: {e}", path.display()));
+                    self.warnings.push(tr!("ссылка {r}: не открыть {}: {e}", "reference {r}: cannot open {}: {e}", path.display()));
                     return;
                 }
             }
@@ -176,29 +176,29 @@ impl Bundler {
             Ok(doc) => doc,
             Err(e) => {
                 let e = e.clone();
-                self.warnings.push(format!("ссылка {r}: {e}"));
+                self.warnings.push(tr!("ссылка {r}: {e}", "reference {r}: {e}"));
                 return None;
             }
         };
         let found = if pointer.is_empty() { Some(doc) } else { doc.pointer(pointer) };
         if found.is_none() {
-            self.warnings.push(format!("ссылка {r} никуда не ведёт"));
+            self.warnings.push(tr!("ссылка {r} никуда не ведёт", "the reference {r} leads nowhere"));
         }
         found.cloned()
     }
 }
 
 fn read(file: &Path) -> Result<Value, String> {
-    let size = fs::metadata(file).map_err(|e| format!("не прочитать {}: {e}", file.display()))?.len();
+    let size = fs::metadata(file).map_err(|e| tr!("не прочитать {}: {e}", "cannot read {}: {e}", file.display()))?.len();
     if size > SIZE_LIMIT {
-        return Err(format!("{} больше {} МБ", file.display(), SIZE_LIMIT >> 20));
+        return Err(tr!("{} больше {} МБ", "{} is over {} MB", file.display(), SIZE_LIMIT >> 20));
     }
-    let text = fs::read_to_string(file).map_err(|e| format!("не прочитать {}: {e}", file.display()))?;
+    let text = fs::read_to_string(file).map_err(|e| tr!("не прочитать {}: {e}", "cannot read {}: {e}", file.display()))?;
     let text = text.trim_start_matches('\u{feff}');
     if text.trim_start().starts_with(['{', '[']) {
-        serde_json::from_str(text).map_err(|e| format!("{}: не JSON: {e}", file.display()))
+        serde_json::from_str(text).map_err(|e| tr!("{}: не JSON: {e}", "{}: not JSON: {e}", file.display()))
     } else {
-        serde_yaml_ng::from_str(text).map_err(|e| format!("{}: ни JSON, ни YAML: {e}", file.display()))
+        serde_yaml_ng::from_str(text).map_err(|e| tr!("{}: ни JSON, ни YAML: {e}", "{}: neither JSON nor YAML: {e}", file.display()))
     }
 }
 

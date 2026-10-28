@@ -27,7 +27,7 @@ use tsubamedo_core::organize;
 use tsubamedo_core::prepare::{prepare_without_files, render_oauth};
 use tsubamedo_core::request_file::RequestFile;
 use tsubamedo_core::view::{Matcher, TextView};
-use tsubamedo_core::{Auth, OAuth2, Request, Vars};
+use tsubamedo_core::{Auth, OAuth2, Request, Vars, tr};
 
 /// Responses kept for the viewer; older ones are dropped with their temporary files.
 const KEEP_RESPONSES: usize = 30;
@@ -88,11 +88,11 @@ impl State {
             .iter()
             .find(|(i, _)| *i == id)
             .map(|(_, r)| r.clone())
-            .ok_or_else(|| "ответ уже удалён из памяти, отправьте запрос ещё раз".into())
+            .ok_or_else(|| tr!("ответ уже удалён из памяти, отправьте запрос ещё раз", "the response is no longer in memory, send the request again"))
     }
 
     fn collection(&self) -> Result<&Collection, String> {
-        self.collection.as_ref().ok_or_else(|| "коллекция не открыта".into())
+        self.collection.as_ref().ok_or_else(|| tr!("коллекция не открыта", "no collection is open"))
     }
 
     /// Keeps a body for the viewer and drops the oldest ones with their views.
@@ -157,8 +157,13 @@ fn give_back_memory() {
 
 type Reply = Result<Value, String>;
 
+/// What a cancelled send answers: the window recognises it (in either language) and shows nothing.
+fn cancelled() -> String {
+    tr!("Отменено", "Cancelled")
+}
+
 fn args<T: DeserializeOwned>(value: Value) -> Result<T, String> {
-    serde_json::from_value(value).map_err(|e| format!("неверные аргументы: {e}"))
+    serde_json::from_value(value).map_err(|e| tr!("неверные аргументы: {e}", "invalid arguments: {e}"))
 }
 
 fn reply<T: Serialize>(value: T) -> Reply {
@@ -408,7 +413,7 @@ impl Session {
                 })
                 .await
             }
-            other => Err(format!("неизвестная команда {other}")),
+            other => Err(tr!("неизвестная команда {other}", "unknown command {other}")),
         }
     }
 
@@ -468,14 +473,18 @@ impl Session {
 
     fn get_request(&self, id: String) -> Reply {
         let state = self.state.lock().unwrap();
-        let entry = state.collection()?.find(&id).ok_or_else(|| format!("запроса {id} нет в коллекции"))?;
+        let entry = state.collection()?.find(&id).ok_or_else(|| tr!("запроса {id} нет в коллекции", "request {id} is not in the collection"))?;
         reply(&entry.request)
     }
 
     fn save_request(&self, a: SaveArg) -> Reply {
         let mut state = self.state.lock().unwrap();
-        let collection = state.collection.as_mut().ok_or("коллекция не открыта")?;
-        let entry = collection.requests.iter_mut().find(|e| e.id == a.id).ok_or_else(|| format!("запроса {} нет в коллекции", a.id))?;
+        let collection = state.collection.as_mut().ok_or_else(|| tr!("коллекция не открыта", "no collection is open"))?;
+        let entry = collection
+            .requests
+            .iter_mut()
+            .find(|e| e.id == a.id)
+            .ok_or_else(|| tr!("запроса {} нет в коллекции", "request {} is not in the collection", a.id))?;
         let mut file = RequestFile::open(&entry.path).map_err(|e| e.to_string())?;
         file.update(&a.request);
         let written = file.save().map_err(|e| e.to_string())?;
@@ -488,7 +497,7 @@ impl Session {
         let folder = root.join(a.folder.trim_matches('/'));
         let base: String = a.name.chars().map(|c| if "/\\:*?\"<>|".contains(c) { '-' } else { c }).collect();
         let base = base.trim().trim_start_matches('.').to_string();
-        let base = if base.is_empty() { "Новый запрос".to_string() } else { base };
+        let base = if base.is_empty() { tr!("Новый запрос", "New request") } else { base };
         let mut path = folder.join(format!("{base}.toml"));
         let mut n = 2;
         while path.exists() {
@@ -544,8 +553,8 @@ impl Session {
 
     /// An old exchange back in the window: its request and, when the body was kept, its answer.
     fn open_history(&self, id: String) -> Reply {
-        let history = self.history().ok_or("история не ведётся")?;
-        let (entry, body) = history.get(&id).ok_or("этой записи в истории уже нет")?;
+        let history = self.history().ok_or_else(no_history)?;
+        let (entry, body) = history.get(&id).ok_or_else(history_gone)?;
         let response = match (entry.meta, body) {
             (Some(mut meta), Some(body)) => {
                 let response_id = self.state.lock().unwrap().keep_body(ResponseBody::Memory(body.into()));
@@ -653,7 +662,7 @@ impl Session {
 
     /// The request's OAuth 2.0 settings with variables substituted, and the store they are in.
     fn oauth_settings(&self, a: &OAuthArg) -> Result<(OAuth2, SharedTokens), String> {
-        let Auth::OAuth2(o) = &a.request.auth else { return Err("у запроса не OAuth 2.0".into()) };
+        let Auth::OAuth2(o) = &a.request.auth else { return Err(tr!("у запроса не OAuth 2.0", "the request does not use OAuth 2.0")) };
         let runner = self.runner(a.env.as_deref(), false)?;
         let o = render_oauth(o, &runner.vars()).map_err(|e| e.to_string())?;
         Ok((o, self.state.lock().unwrap().tokens.clone()))
@@ -662,14 +671,19 @@ impl Session {
     /// A response's status, headers and body: one in memory, or one from history.
     fn side(&self, s: SideArg) -> Result<Answer, String> {
         if let Some(id) = s.history_id {
-            let history = self.history().ok_or("история не ведётся")?;
-            let (entry, body) = history.get(&id).ok_or("этой записи в истории уже нет")?;
-            let body = body.ok_or("у этой записи истории нет тела: ответы больше 1 МБ не сохраняются")?;
+            let history = self.history().ok_or_else(no_history)?;
+            let (entry, body) = history.get(&id).ok_or_else(history_gone)?;
+            let body = body.ok_or_else(|| {
+                tr!(
+                    "у этой записи истории нет тела: ответы больше 1 МБ не сохраняются",
+                    "this history entry has no body: responses over 1 MB are not kept"
+                )
+            })?;
             let meta = entry.meta.unwrap_or(Value::Null);
             let headers: Vec<(String, String)> = serde_json::from_value(meta["headers"].clone()).unwrap_or_default();
             return Ok((entry.status.unwrap_or(0), headers, ResponseBody::Memory(body.into())));
         }
-        let id = s.response_id.ok_or("не указан ответ")?;
+        let id = s.response_id.ok_or_else(|| tr!("не указан ответ", "no response given"))?;
         let body = self.state.lock().unwrap().body(id)?;
         Ok((s.status.unwrap_or(0), s.headers.unwrap_or_default(), body))
     }
@@ -708,7 +722,7 @@ impl Session {
                             Ok::<_, String>(CertSpec { host: r(&spec.host)?, cert: r(&spec.cert)?, key: r(&spec.key)?, passphrase: r(&spec.passphrase)? })
                         })();
                         let status = match rendered.map(|s| ClientCert::load(&s, &root).identity) {
-                            Ok(Ok(identity)) => json!({ "ok": true, "text": format!("{}: сертификатов в цепочке {}", identity.label, identity.chain.len()) }),
+                            Ok(Ok(identity)) => json!({ "ok": true, "text": tr!("{}: сертификатов в цепочке {}", "{}: {} certificates in the chain", identity.label, identity.chain.len()) }),
                             Ok(Err(e)) | Err(e) => json!({ "ok": false, "text": e }),
                         };
                         json!({ "spec": spec, "status": status })
@@ -742,7 +756,7 @@ impl Session {
         self.sends.lock().unwrap().remove(&send_id);
         let got = match result {
             Ok(got) => got.map_err(|e| e.to_string())?,
-            Err(e) if e.is_cancelled() => return Err("Отменено".into()),
+            Err(e) if e.is_cancelled() => return Err(cancelled()),
             Err(e) => return Err(e.to_string()),
         };
         self.save_stores();
@@ -780,13 +794,15 @@ impl Session {
         if let Some(captured) = state.captured.get(env.as_deref().unwrap_or_default()) {
             for (name, v) in captured {
                 list.retain(|x| x.name != *name);
-                list.push(VarSource { name: name.clone(), value: v.value.clone(), source: format!("из ответа «{}»", v.from), secret: false });
+                // A value captured by a draft is kept with «черновик» for where it came from.
+                let from = if v.from == "черновик" { tr!("черновик", "draft") } else { v.from.clone() };
+                list.push(VarSource { name: name.clone(), value: v.value.clone(), source: tr!("из ответа «{from}»", "from the response \"{from}\""), secret: false });
             }
         }
         if let Some(c) = &state.collection {
             for (name, source) in run::producers(c) {
                 if !list.iter().any(|x| x.name == name) {
-                    list.push(VarSource { name, value: String::new(), source: format!("из ответа «{}», придёт при отправке", source.id), secret: false });
+                    list.push(VarSource { name, value: String::new(), source: tr!("из ответа «{}», придёт при отправке", "from the response \"{}\", comes when sent", source.id), secret: false });
                 }
             }
         }
@@ -848,7 +864,7 @@ impl Session {
         self.save_stores();
         let mut exchanges = match result {
             Ok(exchanges) => exchanges,
-            Err(e) if e.is_cancelled() => return Err("Отменено".into()),
+            Err(e) if e.is_cancelled() => return Err(cancelled()),
             Err(e) => return Err(e.to_string()),
         };
         self.keep_captured(a.env.as_deref(), &exchanges);
@@ -863,7 +879,7 @@ impl Session {
                 self.record_exchange(&last, a.env.as_deref(), None);
                 let mut message = e.to_string();
                 for b in before.iter().filter(|b| !b.passed) {
-                    message.push_str(&format!("\nСначала отправлен «{}»: {}", b.id, b.failures.join("; ")));
+                    message.push_str(&tr!("\nСначала отправлен «{}»: {}", "\n\"{}\" was sent first: {}", b.id, b.failures.join("; ")));
                 }
                 return Err(message);
             }
@@ -938,7 +954,7 @@ impl Session {
         let progress = self.runs.lock().unwrap().remove(&a.send_id).unwrap_or(Value::Null);
         match result {
             Ok(()) => {}
-            Err(e) if e.is_cancelled() => return Err("Отменено".into()),
+            Err(e) if e.is_cancelled() => return Err(cancelled()),
             Err(e) => return Err(e.to_string()),
         }
         Ok(json!({ "steps": progress["steps"], "results": progress["results"], "totalMs": started.elapsed().as_secs_f64() * 1000.0 }))
@@ -962,7 +978,7 @@ impl Session {
                     let defaults = SendOptions::default();
                     match TextView::pretty_json(&body, defaults.spill_threshold, defaults.spill_dir) {
                         Ok(Ok(view)) => Ok((view, None)),
-                        Ok(Err(reason)) => Ok((raw()?, Some(format!("Не JSON ({reason}), показано как есть")))),
+                        Ok(Err(reason)) => Ok((raw()?, Some(tr!("Не JSON ({reason}), показано как есть", "Not JSON ({reason}), shown as is")))),
                         Err(e) => Err(e.to_string()),
                     }
                 })
@@ -988,7 +1004,7 @@ impl Session {
     }
 
     fn get_view(&self, id: u64) -> Result<Arc<TextView>, String> {
-        self.state.lock().unwrap().views.get(&id).map(|(_, view)| view.clone()).ok_or_else(|| "вид ответа уже закрыт".into())
+        self.state.lock().unwrap().views.get(&id).map(|(_, view)| view.clone()).ok_or_else(|| tr!("вид ответа уже закрыт", "the response view is already closed"))
     }
 
     fn view_lines(&self, a: LinesArg) -> Reply {
@@ -1017,7 +1033,12 @@ impl Session {
         let view = self.get_view(a.view_id)?;
         let folds = view
             .top_folds(LIMIT)
-            .ok_or("внутри больше 100 000 объектов — сворачивать их все нет смысла")?;
+            .ok_or_else(|| {
+                tr!(
+                    "внутри больше 100 000 объектов — сворачивать их все нет смысла",
+                    "more than 100,000 objects inside — no point folding them all"
+                )
+            })?;
         reply(folds.into_iter().flat_map(|(o, c)| [o, c]).collect::<Vec<u32>>())
     }
 
@@ -1042,7 +1063,11 @@ impl Session {
         let body = self.state.lock().unwrap().body(a.response_id)?;
         let size = view.as_ref().map_or(body.len(), |v| v.len());
         if size > TEXT_LIMIT {
-            return Err(format!("ответ слишком большой для буфера обмена ({} МБ), сохраните его в файл", size >> 20));
+            return Err(tr!(
+                "ответ слишком большой для буфера обмена ({} МБ), сохраните его в файл",
+                "the response is too big for the clipboard ({} MB), save it to a file",
+                size >> 20
+            ));
         }
         blocking(move || {
             let mut out = Vec::new();
@@ -1096,7 +1121,15 @@ fn token_info(t: &oauth::Token) -> Value {
 }
 
 fn repo(root: &Path) -> Result<git::Repo, String> {
-    git::Repo::open(root)?.ok_or_else(|| "коллекция не в git".to_string())
+    git::Repo::open(root)?.ok_or_else(|| tr!("коллекция не в git", "the collection is not in git"))
+}
+
+fn no_history() -> String {
+    tr!("история не ведётся", "history is off")
+}
+
+fn history_gone() -> String {
+    tr!("этой записи в истории уже нет", "this history entry is gone")
 }
 
 /// `{"git": "missing", "error"}` without git, `{"git": "none"}` outside a repository, else the
@@ -1517,4 +1550,23 @@ struct LineOut {
     fold_end: Option<u32>,
     /// UTF-16 ranges of search matches.
     marks: Vec<[u32; 2]>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_for_the_window_follow_the_language() {
+        let state = State::default();
+        let closed = || Session::new().get_view(7).err().unwrap();
+        assert_eq!(state.collection().err().unwrap(), "коллекция не открыта");
+        assert_eq!(closed(), "вид ответа уже закрыт");
+        tsubamedo_core::lang::in_language(true, || {
+            assert_eq!(state.collection().err().unwrap(), "no collection is open");
+            assert_eq!(closed(), "the response view is already closed");
+            assert!(args::<u64>(json!("x")).unwrap_err().starts_with("invalid arguments: "));
+            assert_eq!(cancelled(), "Cancelled");
+        });
+    }
 }

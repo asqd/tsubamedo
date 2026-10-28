@@ -8,7 +8,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use clap::{Args, Parser, Subcommand};
+use clap::builder::Str;
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use tsubamedo_core::collection::{Collection, MANIFEST};
 use tsubamedo_core::codegen;
 use tsubamedo_core::compare::{self, BodyDiff, ChangeKind, Options, Side};
@@ -17,7 +18,7 @@ use tsubamedo_core::http::{CertSpec, ClientCert, ProxyConfig, Response, SendOpti
 use tsubamedo_core::prepare::prepare;
 use tsubamedo_core::request_file::RequestFile;
 use tsubamedo_core::run::{Event, Exchange, RunOptions, Runner};
-use tsubamedo_core::{Body, Error, Pair, Request, Vars};
+use tsubamedo_core::{Body, Error, Pair, Request, Vars, lang, tr, tr_static};
 
 mod junit;
 
@@ -203,13 +204,139 @@ struct CheckArgs {
 }
 
 fn parse_var(text: &str) -> Result<(String, String), String> {
-    let (name, value) = text.split_once('=').ok_or("нужно ИМЯ=ЗНАЧЕНИЕ")?;
+    let (name, value) = text.split_once('=').ok_or_else(|| tr!("нужно ИМЯ=ЗНАЧЕНИЕ", "expected NAME=VALUE"))?;
     Ok((name.trim().to_string(), value.to_string()))
+}
+
+/// The English of `--help` (no final period, as clap trims it from the Russian): the
+/// attributes above hold the Russian. `(subcommand, argument,
+/// text)`; an empty argument is the subcommand's own line, `*` stands for any subcommand.
+const ENGLISH_HELP: &[(&str, &str, &str)] = &[
+    ("", "", "TsubameDo: HTTP requests and collections in the terminal"),
+    ("send", "", "Send one request: a URL, a request file or its name in the collection"),
+    ("run", "", "Send a collection's requests: each after those whose values it takes, with checks"),
+    ("compare", "", "Compare the responses of one request in two environments: stage and prod"),
+    ("code", "", "The request as code: curl, Python, JavaScript, Go and 20 more"),
+    ("check", "", "Check that the files read and every variable is set"),
+    ("import", "", "Bring in an Insomnia or Postman collection, an OpenAPI or Swagger description, a HAR recording"),
+    ("init", "", "Create a collection in a folder"),
+    ("import", "file", "An Insomnia export (JSON or YAML), a Postman collection or environment, OpenAPI, HAR"),
+    (
+        "import",
+        "to",
+        "Where to: a new folder (by default named after the collection, in the current one) or an existing collection — then the requests go into a folder inside it",
+    ),
+    ("*", "env", "An environment from the collection's env folder"),
+    ("*", "vars", "A variable over all the others: --var token=abc"),
+    ("*", "insecure", "Do not verify the server's certificate (test servers with a self-signed one)"),
+    ("*", "max_time", "A limit on the whole exchange, in seconds"),
+    ("*", "no_cookies", "Do not send cookies the server set (by default they live while the command runs)"),
+    (
+        "*",
+        "proxy",
+        "Proxy: proxy:3128, http://user:password@proxy:3128, socks5://proxy:1080. Without it — HTTPS_PROXY and the like, and on macOS the system settings",
+    ),
+    ("*", "noproxy", "Where to go without the proxy: .corp.local,10.0.0.0/8; '*' — nowhere through the proxy"),
+    (
+        "*",
+        "cert",
+        "Client certificate: PEM (the key in it or in --key) or .p12/.pfx. For every server; per server — [[certificates]] in tsubamedo.toml",
+    ),
+    ("*", "key", "The certificate's private key, if it is in a separate file"),
+    ("*", "cert_pass", "The password of the .p12 or of an encrypted key"),
+    ("send", "headers", "A header \"Name: value\""),
+    ("send", "data", "Body as in curl (form-urlencoded); @file — the file's content"),
+    ("send", "json", "JSON body; @file — from a file"),
+    ("send", "include", "Show the response headers"),
+    ("send", "quiet", "Write nothing to stderr"),
+    ("send", "no_follow", "Do not follow redirects"),
+    ("send", "output", "Save the response body to a file"),
+    ("send", "raw", "The body as it came, without formatting JSON"),
+    ("send", "fail", "Exit code 1 if the response status is 400 or above (checks from the request file — always)"),
+    ("run", "filter", "Only requests with this text in their name or path"),
+    ("run", "fail", "Count a status of 400 and above as an error"),
+    ("run", "bail", "Stop at the first error"),
+    ("run", "parallel", "How many requests to send at once; those waiting for values from others still go after them"),
+    ("run", "retry", "How many times to retry a failed request"),
+    ("run", "junit", "Write a JUnit XML report for CI (GitLab, Jenkins, GitHub Actions)"),
+    ("*", "target", "A collection request (name or file) or a URL"),
+    ("compare", "with", "The environment to compare with; the first one comes from --env"),
+    ("compare", "ignore", "Do not compare this place in the JSON: $.meta.requestId, $.items[*].updatedAt or a field name anywhere"),
+    ("compare", "all_headers", "Also show the headers that always change (Date, X-Request-Id…)"),
+    ("code", "lang", "Language: curl, python-requests, js-fetch, go… (--list shows them all)"),
+    ("code", "list", "Show the languages"),
+    ("check", "env", "Environment; without it every one is checked"),
+];
+
+/// Placeholders of values, Russian → English.
+const ENGLISH_VALUE_NAMES: &[(&str, &str)] = &[
+    ("ПАПКА", "DIR"),
+    ("ИМЯ=ЗНАЧЕНИЕ", "NAME=VALUE"),
+    ("СЕК", "SECS"),
+    ("АДРЕС", "URL"),
+    ("СПИСОК", "LIST"),
+    ("ФАЙЛ", "FILE"),
+    ("ПАРОЛЬ", "PASSWORD"),
+    ("ОКРУЖЕНИЕ", "ENV"),
+    ("ПУТЬ", "PATH"),
+];
+
+/// The command line in the language of the process.
+fn parse_cli() -> Cli {
+    let mut command = Cli::command();
+    if lang::english() {
+        command = english_help(command);
+    }
+    Cli::from_arg_matches(&command.get_matches()).unwrap_or_else(|e| e.exit())
+}
+
+/// clap's attributes are fixed at compile time, so for English the built command gets its
+/// texts replaced from the tables above, subcommand by subcommand.
+fn english_help(command: clap::Command) -> clap::Command {
+    fn translate(mut command: clap::Command, sub: &str) -> clap::Command {
+        let english = |arg: &str| {
+            let exact = ENGLISH_HELP.iter().find(|(s, a, _)| *s == sub && *a == arg);
+            let shared = || ENGLISH_HELP.iter().find(|(s, a, _)| *s == "*" && *a == arg && !sub.is_empty());
+            exact.or_else(shared).map(|(.., text)| *text)
+        };
+        if let Some(about) = english("") {
+            command = command.about(about).long_about(None);
+        }
+        let args: Vec<String> = command.get_arguments().map(|a| a.get_id().to_string()).collect();
+        for id in args {
+            let help = english(&id);
+            command = command.mut_arg(&id, |mut arg| {
+                if let Some(help) = help {
+                    // Only where the Russian has a help line: positional `target` of `send` has none.
+                    if arg.get_help().is_some() {
+                        arg = arg.help(help).long_help(None);
+                    }
+                }
+                let names: Option<Vec<Str>> = arg.get_value_names().map(|names| {
+                    names
+                        .iter()
+                        .map(|n| ENGLISH_VALUE_NAMES.iter().find(|(ru, _)| *ru == n.as_str()).map_or_else(|| n.clone(), |(_, en)| Str::from(*en)))
+                        .collect()
+                });
+                match names {
+                    Some(names) => arg.value_names(names),
+                    None => arg,
+                }
+            });
+        }
+        let subs: Vec<String> = command.get_subcommands().map(|s| s.get_name().to_string()).collect();
+        for name in subs {
+            command = command.mut_subcommand(&name, |s| translate(s, &name));
+        }
+        command
+    }
+    translate(command, "")
 }
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let cli = Cli::parse();
+    lang::set_english(lang::english_from_env());
+    let cli = parse_cli();
     let result = match cli.command {
         Command::Send(args) => send_one(args).await,
         Command::Run(args) => run(args).await,
@@ -222,11 +349,11 @@ async fn main() -> ExitCode {
     match result {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("{}", Paint::stderr().red(&format!("ошибка: {e}")));
+            eprintln!("{}", Paint::stderr().red(&tr!("ошибка: {e}", "error: {e}")));
             if let Error::Tls { reason, .. } = &e
                 && reason.contains("certificate")
             {
-                eprintln!("Если это тестовый стенд с самоподписанным сертификатом, добавьте -k.");
+                eprintln!("{}", tr_static!("Если это тестовый стенд с самоподписанным сертификатом, добавьте -k.", "If this is a test server with a self-signed certificate, add -k."));
             }
             ExitCode::FAILURE
         }
@@ -283,7 +410,7 @@ fn resolve_target(text: &str, env: Option<&str>) -> tsubamedo_core::Result<Targe
     let root = Collection::find_root(if from_file { target } else { &cwd });
     let collection = root.map(Collection::open).transpose()?;
     if collection.is_none() && env.is_some() {
-        return Err(Error::Invalid(format!("окружение задано, но {MANIFEST} не найден ни здесь, ни выше")));
+        return Err(Error::Invalid(tr!("окружение задано, но {MANIFEST} не найден ни здесь, ни выше", "an environment is given, but there is no {MANIFEST} here or above")));
     }
     if from_file {
         let request = RequestFile::open(target)?.request()?;
@@ -316,7 +443,7 @@ async fn send_one(args: SendArgs) -> tsubamedo_core::Result<ExitCode> {
     for header in &args.headers {
         let (name, value) = header
             .split_once(':')
-            .ok_or_else(|| Error::Invalid(format!("заголовок «{header}»: нужно «Имя: значение»")))?;
+            .ok_or_else(|| Error::Invalid(tr!("заголовок «{header}»: нужно «Имя: значение»", "header \"{header}\": expected \"Name: value\"")))?;
         request.headers.retain(|p| !p.name.eq_ignore_ascii_case(name.trim()));
         request.headers.push(Pair::new(name.trim(), value.trim()));
     }
@@ -342,7 +469,7 @@ async fn send_one(args: SendArgs) -> tsubamedo_core::Result<ExitCode> {
     if !args.quiet {
         for ex in &exchanges {
             let status = ex.result.as_ref().map_or_else(|e| paint.red(&e.to_string()), |r| paint.status(r.status, &r.status.to_string()));
-            eprintln!("{}", paint.dim(&format!("Сначала {}: {status}", ex.id.as_deref().unwrap_or_default())));
+            eprintln!("{}", paint.dim(&tr!("Сначала {}: {status}", "First {}: {status}", ex.id.as_deref().unwrap_or_default())));
         }
     }
     let passed = last.passed();
@@ -365,7 +492,7 @@ fn check_lines(ex: &Exchange, paint: &Paint) -> Vec<String> {
         if c.ok {
             out.push(format!("  {} {}", paint.green("✓"), paint.dim(&c.check)));
         } else {
-            let why = c.error.clone().or_else(|| c.actual.as_ref().map(|a| format!("пришло {a}"))).unwrap_or_default();
+            let why = c.error.clone().or_else(|| c.actual.as_ref().map(|a| tr!("пришло {a}", "got {a}"))).unwrap_or_default();
             out.push(format!("  {} {} {}", paint.red("✗"), c.check, paint.red(&format!("— {why}"))));
         }
     }
@@ -392,23 +519,23 @@ fn print_head(r: &Response, include: bool) {
         }
     }
     let t = &r.timings;
-    let mut parts = vec![format!("DNS {}", duration(t.dns)), format!("подключение {}", duration(t.connect))];
+    let mut parts = vec![format!("DNS {}", duration(t.dns)), tr!("подключение {}", "connect {}", duration(t.connect))];
     if let Some(tls) = t.tls {
         parts.push(format!("TLS {}", duration(tls)));
     }
-    parts.push(format!("ожидание {}", duration(t.wait)));
-    parts.push(format!("загрузка {}", duration(t.download)));
-    parts.push(format!("всего {}", duration(t.total)));
+    parts.push(tr!("ожидание {}", "wait {}", duration(t.wait)));
+    parts.push(tr!("загрузка {}", "download {}", duration(t.download)));
+    parts.push(tr!("всего {}", "total {}", duration(t.total)));
     let mut body = size(r.body.len());
     if r.wire_size != r.body.len() {
-        body.push_str(&format!(" (по сети {})", size(r.wire_size)));
+        body.push_str(&tr!(" (по сети {})", " ({} over the wire)", size(r.wire_size)));
     }
     parts.push(body);
     if let Some(via) = &r.via {
-        parts.push(format!("через прокси {via}"));
+        parts.push(tr!("через прокси {via}", "via proxy {via}"));
     }
     if let Some(cert) = r.tls.as_ref().and_then(|t| t.client_cert.as_ref()) {
-        parts.push(format!("сертификат {cert}"));
+        parts.push(tr!("сертификат {cert}", "certificate {cert}"));
     }
     let _ = writeln!(err, "{}", paint.dim(&parts.join(" · ")));
 }
@@ -419,7 +546,7 @@ fn write_body(r: &Response, args: &SendArgs) -> tsubamedo_core::Result<()> {
         let mut file = std::fs::File::create(path).map_err(|e| Error::io(path, e))?;
         io::copy(&mut r.body.reader().map_err(|e| Error::io(path, e))?, &mut file).map_err(|e| Error::io(path, e))?;
         if !args.quiet {
-            eprintln!("Сохранено: {} ({})", path.display(), size(r.body.len()));
+            eprintln!("{}", tr!("Сохранено: {} ({})", "Saved: {} ({})", path.display(), size(r.body.len())));
         }
         return Ok(());
     }
@@ -430,11 +557,18 @@ fn write_body(r: &Response, args: &SendArgs) -> tsubamedo_core::Result<()> {
         const SHOW_LIMIT: u64 = 20 << 20;
         let head = r.body.head(8 << 10).map_err(io_err)?;
         if head.contains(&0) {
-            eprintln!("Двоичный ответ, {}: сохраните его через -o файл.", size(r.body.len()));
+            eprintln!("{}", tr!("Двоичный ответ, {}: сохраните его через -o файл.", "Binary response, {}: save it with -o file.", size(r.body.len())));
             return Ok(());
         }
         if r.body.len() > SHOW_LIMIT {
-            eprintln!("Ответ {}: сохраните его через -o файл или направьте в другую программу.", size(r.body.len()));
+            eprintln!(
+                "{}",
+                tr!(
+                    "Ответ {}: сохраните его через -o файл или направьте в другую программу.",
+                    "The response is {}: save it with -o file or pipe it to another program.",
+                    size(r.body.len())
+                )
+            );
             return Ok(());
         }
         let mut text = Vec::new();
@@ -486,7 +620,7 @@ async fn run(args: RunArgs) -> tsubamedo_core::Result<ExitCode> {
     runner
         .run(&steps, &options, |event| match event {
             Event::Started { step, attempt } if attempt > 1 => {
-                println!("{}", paint.dim(&format!("↻ {} — попытка {attempt}", steps[step].id)));
+                println!("{}", paint.dim(&tr!("↻ {} — попытка {attempt}", "↻ {} — attempt {attempt}", steps[step].id)));
             }
             Event::Started { .. } => {}
             Event::Finished { step, exchanges, .. } => {
@@ -506,11 +640,11 @@ async fn run(args: RunArgs) -> tsubamedo_core::Result<ExitCode> {
         }
     }
     let (passed, failed) = report.counts();
-    let summary = format!("Успешно: {passed}, с ошибкой: {failed}, за {}", duration(started.elapsed()));
+    let summary = tr!("Успешно: {passed}, с ошибкой: {failed}, за {}", "Passed: {passed}, failed: {failed}, in {}", duration(started.elapsed()));
     println!("\n{}", if failed == 0 { paint.green(&summary) } else { paint.red(&summary) });
     if let Some(path) = &args.junit {
         std::fs::write(path, report.xml(started.elapsed())).map_err(|e| Error::io(path, e))?;
-        println!("{}", paint.dim(&format!("Отчёт JUnit: {}", path.display())));
+        println!("{}", paint.dim(&tr!("Отчёт JUnit: {}", "JUnit report: {}", path.display())));
     }
     Ok(if failed == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE })
 }
@@ -520,7 +654,7 @@ fn print_exchange(ex: &Exchange, collection: &Collection, args: &RunArgs, paint:
     let status = ex.result.as_ref().ok().map(|r| r.status);
     let mut failures = ex.failures();
     if args.fail && status.is_some_and(|s| s >= 400) {
-        failures.push(format!("статус {}", status.unwrap_or_default()));
+        failures.push(tr!("статус {}", "status {}", status.unwrap_or_default()));
     }
     let ok = failures.is_empty();
     let entry = collection.find(ex.id.as_deref().unwrap_or_default());
@@ -534,7 +668,7 @@ fn print_exchange(ex: &Exchange, collection: &Collection, args: &RunArgs, paint:
             let checks = if ex.checks.is_empty() {
                 String::new()
             } else {
-                paint.dim(&format!("  проверки {}/{}", ex.checks.iter().filter(|c| c.ok).count(), ex.checks.len()))
+                paint.dim(&tr!("  проверки {}/{}", "  checks {}/{}", ex.checks.iter().filter(|c| c.ok).count(), ex.checks.len()))
             };
             println!(
                 "{mark} {}  {:>8}  {:>9}  {} {title}{checks}",
@@ -547,7 +681,7 @@ fn print_exchange(ex: &Exchange, collection: &Collection, args: &RunArgs, paint:
                 println!("  {line}");
             }
             if args.fail && r.status >= 400 && ex.checks.is_empty() {
-                println!("    {}", paint.red(&format!("статус {}", r.status)));
+                println!("    {}", paint.red(&tr!("статус {}", "status {}", r.status)));
             }
         }
         Err(e) => println!("{mark} {title}\n    {}", paint.red(&e.to_string())),
@@ -576,7 +710,7 @@ fn code(args: CodeArgs) -> tsubamedo_core::Result<ExitCode> {
             with.extend(names.iter().map(|n| (n.clone(), format!("<{n}>"))));
             // In the address a placeholder makes no address: then the error as it was.
             let prepared = prepare_without_files(&request, &with, &dir).map_err(|_| Error::UndefinedVars(names.clone()))?;
-            eprintln!("{}", Paint::stderr().yellow(&format!("не заданы переменные: {} — в коде они как <имя>", names.join(", "))));
+            eprintln!("{}", Paint::stderr().yellow(&tr!("не заданы переменные: {} — в коде они как <имя>", "variables not set: {} — in the code they are <name>", names.join(", "))));
             vars = with;
             prepared
         }
@@ -594,7 +728,7 @@ fn code(args: CodeArgs) -> tsubamedo_core::Result<ExitCode> {
 /// The same request in two environments, sent side by side; exit code 1 when they differ.
 async fn compare(args: CompareArgs) -> tsubamedo_core::Result<ExitCode> {
     let Target { request, collection, id, dir } = resolve_target(&args.target, Some(&args.with))?;
-    let label = |env: Option<&str>| env.unwrap_or("без окружения").to_string();
+    let label = |env: Option<&str>| env.unwrap_or(no_env()).to_string();
     let (left_env, right_env) = (args.common.env.as_deref(), Some(args.with.as_str()));
     let send = |env: Option<&str>| -> tsubamedo_core::Result<_> {
         let mut runner = Runner::new(collection.as_ref(), env, overrides(&args.common), Vars::new(), send_options(&args.common))?;
@@ -608,27 +742,35 @@ async fn compare(args: CompareArgs) -> tsubamedo_core::Result<ExitCode> {
     fn side(r: &Response) -> Side<'_> {
         Side { status: r.status, headers: &r.headers, body: &r.body }
     }
-    let result = compare::compare(&side(&left), &side(&right), &options).map_err(|e| Error::io("тело ответа", e))?;
+    let result = compare::compare(&side(&left), &side(&right), &options).map_err(|e| Error::io(tr!("тело ответа", "response body"), e))?;
 
     let paint = Paint::stdout();
     let mut out = io::stdout().lock();
     let (l, r) = (label(left_env), label(right_env));
     let _ = writeln!(out, "{} {}", paint.bold(&format!("{l} ⟷ {r}")), paint.dim(&format!("{} {}", request.method.to_uppercase(), left.url)));
     let [a, b] = result.status;
-    let status = if a == b { paint.dim(&format!("статус {a} в обоих")) } else { format!("статус {} → {}", paint.status(a, &a.to_string()), paint.status(b, &b.to_string())) };
+    let status = if a == b {
+        paint.dim(&tr!("статус {a} в обоих", "status {a} in both"))
+    } else {
+        tr!("статус {} → {}", "status {} → {}", paint.status(a, &a.to_string()), paint.status(b, &b.to_string()))
+    };
     let _ = writeln!(out, "{status}");
     for h in &result.headers {
-        let none = || "(нет)".to_string();
+        let none = || tr!("(нет)", "(none)");
         let _ = writeln!(out, "{} {}: {} → {}", paint.yellow("~"), h.name, h.left.clone().unwrap_or_else(none), h.right.clone().unwrap_or_else(none));
     }
     if result.hidden_headers > 0 {
         let n = result.hidden_headers;
-        let what = plural(n, "заголовок, который меняется", "заголовка, которые меняются", "заголовков, которые меняются");
-        let _ = writeln!(out, "{}", paint.dim(&format!("и ещё {n} {what} всегда (--all-headers)")));
+        let what = plural(
+            n,
+            ["заголовок, который меняется", "заголовка, которые меняются", "заголовков, которые меняются"],
+            ["header that always changes", "headers that always change"],
+        );
+        let _ = writeln!(out, "{}", paint.dim(&tr!("и ещё {n} {what} всегда (--all-headers)", "and {n} more {what} (--all-headers)")));
     }
     match &result.body {
         BodyDiff::Same { size: s } => {
-            let _ = writeln!(out, "{}", paint.dim(&format!("тело одинаковое, {}", size(*s))));
+            let _ = writeln!(out, "{}", paint.dim(&tr!("тело одинаковое, {}", "same body, {}", size(*s))));
         }
         BodyDiff::Json { changes, total, ignored } => {
             for c in changes {
@@ -636,19 +778,19 @@ async fn compare(args: CompareArgs) -> tsubamedo_core::Result<ExitCode> {
                     ChangeKind::Added => (paint.green("+"), c.right.clone().unwrap_or_default()),
                     ChangeKind::Removed => (paint.red("-"), c.left.clone().unwrap_or_default()),
                     ChangeKind::Changed => (paint.yellow("~"), format!("{} → {}", c.left.clone().unwrap_or_default(), c.right.clone().unwrap_or_default())),
-                    ChangeKind::Order => (paint.yellow("↕"), format!("порядок: {} → {}", c.left.clone().unwrap_or_default(), c.right.clone().unwrap_or_default())),
+                    ChangeKind::Order => (paint.yellow("↕"), tr!("порядок: {} → {}", "order: {} → {}", c.left.clone().unwrap_or_default(), c.right.clone().unwrap_or_default())),
                 };
                 let _ = writeln!(out, "{mark} {} {text}", paint.bold(&c.path));
             }
             if *total > changes.len() {
                 let n = total - changes.len();
-                let _ = writeln!(out, "{}", paint.dim(&format!("и ещё {n} {}", plural(n, "изменение", "изменения", "изменений"))));
+                let _ = writeln!(out, "{}", paint.dim(&tr!("и ещё {n} {}", "and {n} more {}", plural(n, ["изменение", "изменения", "изменений"], ["change", "changes"]))));
             }
             if *total == 0 {
-                let _ = writeln!(out, "{}", paint.dim("тело одинаковое по смыслу (порядок ключей и пробелы не в счёт)"));
+                let _ = writeln!(out, "{}", paint.dim(tr_static!("тело одинаковое по смыслу (порядок ключей и пробелы не в счёт)", "the bodies mean the same (key order and whitespace do not count)")));
             }
             if *ignored > 0 {
-                let _ = writeln!(out, "{}", paint.dim(&format!("не сравнивалось по --ignore: {ignored}")));
+                let _ = writeln!(out, "{}", paint.dim(&tr!("не сравнивалось по --ignore: {ignored}", "not compared because of --ignore: {ignored}")));
             }
         }
         BodyDiff::Text { lines, truncated, .. } => {
@@ -662,16 +804,19 @@ async fn compare(args: CompareArgs) -> tsubamedo_core::Result<ExitCode> {
                 let _ = writeln!(out, "{text}");
             }
             if *truncated {
-                let _ = writeln!(out, "{}", paint.dim("показано не всё"));
+                let _ = writeln!(out, "{}", paint.dim(tr_static!("показано не всё", "not everything is shown")));
             }
         }
         BodyDiff::Big { sizes, first_difference } => {
-            let at = first_difference.map(|p| format!(", расходятся со строки {} (байт {})", p.line, p.byte)).unwrap_or_default();
-            let _ = writeln!(out, "тела слишком большие для сравнения по строкам: {} и {}{at}", size(sizes[0]), size(sizes[1]));
+            let at = first_difference
+                .map(|p| tr!(", расходятся со строки {} (байт {})", ", they differ from line {} (byte {})", p.line, p.byte))
+                .unwrap_or_default();
+            let (a, b) = (size(sizes[0]), size(sizes[1]));
+            let _ = writeln!(out, "{}", tr!("тела слишком большие для сравнения по строкам: {a} и {b}{at}", "the bodies are too big to compare line by line: {a} and {b}{at}"));
         }
     }
     Ok(if result.same() {
-        let _ = writeln!(out, "{}", paint.green("Ответы одинаковые"));
+        let _ = writeln!(out, "{}", paint.green(tr_static!("Ответы одинаковые", "The responses are the same")));
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
@@ -692,7 +837,7 @@ fn check(args: CheckArgs) -> tsubamedo_core::Result<ExitCode> {
         None => collection.environments().into_iter().map(Some).collect(),
     };
     for env in &envs {
-        let label = env.as_deref().unwrap_or("без окружения");
+        let label = env.as_deref().unwrap_or(no_env());
         let vars = match collection.vars(env.as_deref(), &Vars::new()) {
             Ok(vars) => vars,
             Err(e) => {
@@ -708,14 +853,18 @@ fn check(args: CheckArgs) -> tsubamedo_core::Result<ExitCode> {
             }
         }
     }
-    let labels: Vec<&str> = envs.iter().map(|e| e.as_deref().unwrap_or("без окружения")).collect();
+    let labels: Vec<&str> = envs.iter().map(|e| e.as_deref().unwrap_or(no_env())).collect();
     if problems == 0 {
-        println!("{}", paint.green(&format!("Запросов: {}, все готовы ({})", collection.requests.len(), labels.join(", "))));
+        println!("{}", paint.green(&tr!("Запросов: {}, все готовы ({})", "Requests: {}, all ready ({})", collection.requests.len(), labels.join(", "))));
         Ok(ExitCode::SUCCESS)
     } else {
-        println!("\n{}", paint.red(&format!("Проблем: {problems}")));
+        println!("\n{}", paint.red(&tr!("Проблем: {problems}", "Problems: {problems}")));
         Ok(ExitCode::FAILURE)
     }
+}
+
+fn no_env() -> &'static str {
+    tr_static!("без окружения", "no environment")
 }
 
 fn import(file: &Path, to: Option<PathBuf>) -> tsubamedo_core::Result<ExitCode> {
@@ -723,26 +872,27 @@ fn import(file: &Path, to: Option<PathBuf>) -> tsubamedo_core::Result<ExitCode> 
     let paint = Paint::stdout();
     let dir = to.unwrap_or_else(|| tsubamedo_core::import::new_dir(&imported, Path::new(".")));
     let written = tsubamedo_core::import::write(&imported, &dir)?;
-    println!("{} {} «{}»", paint.bold("Импорт:"), imported.format.title(), imported.name);
+    let (title, name) = (paint.bold(tr_static!("Импорт:", "Import:")), imported.format.title());
+    println!("{}", tr!("{title} {name} «{}»", "{title} {name} \"{}\"", imported.name));
     let place = if written.folder.is_empty() {
-        format!("Создана коллекция {}", dir.display())
+        tr!("Создана коллекция {}", "Created the collection {}", dir.display())
     } else {
-        format!("В коллекцию {} в папку «{}»", written.root.display(), written.folder)
+        tr!("В коллекцию {} в папку «{}»", "Into the collection {}, folder \"{}\"", written.root.display(), written.folder)
     };
-    let mut what = vec![format!("запросов: {}", written.requests)];
+    let mut what = vec![tr!("запросов: {}", "requests: {}", written.requests)];
     if !written.environments.is_empty() {
-        what.push(format!("окружения: {}", written.environments.join(", ")));
+        what.push(tr!("окружения: {}", "environments: {}", written.environments.join(", ")));
     }
     println!("{place} — {}", what.join(", "));
     for w in &imported.warnings {
         println!("{}", paint.yellow(&format!("! {w}")));
     }
     if !written.kept.is_empty() {
-        println!("{}", paint.dim(&format!("Уже были, оставлены прежние значения: {}", written.kept.join(", "))));
+        println!("{}", paint.dim(&tr!("Уже были, оставлены прежние значения: {}", "Already there, the old values are kept: {}", written.kept.join(", "))));
     }
     if written.requests > 0 {
         let env = written.environments.first().map(|e| format!(" -e {e}")).unwrap_or_default();
-        println!("{}", paint.dim(&format!("Попробуйте: tsubamedo run {}{env}", written.root.display())));
+        println!("{}", paint.dim(&tr!("Попробуйте: tsubamedo run {}{env}", "Try: tsubamedo run {}{env}", written.root.display())));
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -750,18 +900,27 @@ fn import(file: &Path, to: Option<PathBuf>) -> tsubamedo_core::Result<ExitCode> 
 fn init(dir: &Path) -> tsubamedo_core::Result<ExitCode> {
     let manifest = dir.join(MANIFEST);
     if manifest.exists() {
-        return Err(Error::Invalid(format!("{} уже есть", manifest.display())));
+        return Err(Error::Invalid(tr!("{} уже есть", "{} already exists", manifest.display())));
     }
     let name = std::path::absolute(dir)
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| "Коллекция".into());
+        .unwrap_or_else(|| tr!("Коллекция", "Collection"));
     let files = [
-        (MANIFEST.to_string(), format!("name = {name:?}\n\n# Переменные для всех окружений.\n[vars]\nbase_url = \"https://httpbin.org\"\n")),
+        (
+            MANIFEST.to_string(),
+            tr!(
+                "name = {name:?}\n\n# Переменные для всех окружений.\n[vars]\nbase_url = \"https://httpbin.org\"\n",
+                "name = {name:?}\n\n# Variables for every environment.\n[vars]\nbase_url = \"https://httpbin.org\"\n"
+            ),
+        ),
         ("env/dev.toml".into(), "[vars]\nbase_url = \"https://httpbin.org\"\n".into()),
         (
             "env/dev.local.toml".into(),
-            "# Секреты окружения: этот файл не попадает в git.\n[vars]\ntoken = \"замените-меня\"\n".into(),
+            tr!(
+                "# Секреты окружения: этот файл не попадает в git.\n[vars]\ntoken = \"замените-меня\"\n",
+                "# The environment's secrets: this file stays out of git.\n[vars]\ntoken = \"replace-me\"\n"
+            ),
         ),
         (".gitignore".into(), "*.local.toml\n".into()),
     ];
@@ -775,13 +934,40 @@ fn init(dir: &Path) -> tsubamedo_core::Result<ExitCode> {
         }
     }
     let example = Request {
-        name: Some("Пример".into()),
+        name: Some(tr!("Пример", "Example")),
         url: "{{base_url}}/anything".into(),
         query: vec![Pair::new("from", "tsubamedo")],
         headers: vec![Pair::new("Accept", "application/json"), Pair::new("Authorization", "Bearer {{token}}")],
         ..Request::default()
     };
     RequestFile::create(dir.join("example.toml"), &example).save()?;
-    println!("Коллекция создана в {}. Попробуйте: tsubamedo run {} -e dev", dir.display(), dir.display());
+    println!("{}", tr!("Коллекция создана в {0}. Попробуйте: tsubamedo run {0} -e dev", "Collection created in {0}. Try: tsubamedo run {0} -e dev", dir.display()));
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn english_help_leaves_no_russian() {
+        let mut command = english_help(Cli::command());
+        let mut texts = vec![command.render_long_help().to_string()];
+        let names: Vec<String> = command.get_subcommands().map(|s| s.get_name().to_string()).collect();
+        for name in names {
+            texts.push(command.find_subcommand_mut(&name).unwrap().render_long_help().to_string());
+        }
+        for text in texts {
+            assert!(!text.chars().any(|c| ('а'..='я').contains(&c.to_lowercase().next().unwrap_or(c)) || c == 'ё'), "{text}");
+        }
+        let russian = Cli::command().render_long_help().to_string();
+        assert!(russian.contains("HTTP-запросы и коллекции"), "{russian}");
+    }
+
+    #[test]
+    fn var_needs_a_name() {
+        assert_eq!(parse_var("token=abc").unwrap(), ("token".to_string(), "abc".to_string()));
+        assert_eq!(parse_var("token").unwrap_err(), "нужно ИМЯ=ЗНАЧЕНИЕ");
+        assert_eq!(lang::in_language(true, || parse_var("token")).unwrap_err(), "expected NAME=VALUE");
+    }
 }

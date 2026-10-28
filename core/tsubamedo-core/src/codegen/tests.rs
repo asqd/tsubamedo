@@ -138,6 +138,8 @@ fn what_a_target_cannot_repeat_is_said() {
     let swift = generate("swift", &spec(&r)).unwrap();
     assert!(swift.starts_with("// Digest-авторизация здесь не повторяется"), "{swift}");
     assert_eq!(swift.lines().take_while(|l| l.starts_with("//")).count(), 3);
+    let swift = crate::lang::in_language(true, || generate("swift", &spec(&r)).unwrap());
+    assert!(swift.starts_with("// Digest authorization is not repeated here"), "{swift}");
     let php = generate("php-curl", &spec(&r)).unwrap();
     assert!(php.starts_with("<?php\n\n$curl"), "everything is supported, no notes: {php}");
 }

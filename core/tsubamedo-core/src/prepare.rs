@@ -137,7 +137,7 @@ fn prepare_with(request: &Request, vars: &Vars, base_dir: &Path, read_files: boo
         url.query_pairs_mut().extend_pairs(query);
     }
     if method.is_empty() || !method.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.!#$%&'*+^`|~".contains(&b)) {
-        return Err(Error::Invalid(format!("неверный метод «{method}»")));
+        return Err(Error::Invalid(tr!("неверный метод «{method}»", "invalid method \"{method}\"")));
     }
     Ok(Prepared { method, url, headers, body, options: request.options.clone(), oauth, digest, aws })
 }
@@ -197,15 +197,15 @@ pub fn parse_url(text: &str) -> Result<Url> {
     let text = text.trim();
     let bad = |reason: String| Error::BadUrl { url: text.to_string(), reason };
     if text.is_empty() {
-        return Err(bad("адрес пустой".into()));
+        return Err(bad(tr!("адрес пустой", "the address is empty")));
     }
     let with_scheme = if text.contains("://") { text.to_string() } else { format!("http://{text}") };
     let url = Url::parse(&with_scheme).map_err(|e| bad(e.to_string()))?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err(bad("поддерживаются только http и https".into()));
+        return Err(bad(tr!("поддерживаются только http и https", "only http and https are supported")));
     }
     if url.host().is_none() {
-        return Err(bad("нет имени сервера".into()));
+        return Err(bad(tr!("нет имени сервера", "no host name")));
     }
     Ok(url)
 }

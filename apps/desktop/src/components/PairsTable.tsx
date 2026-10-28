@@ -1,13 +1,14 @@
 // Query parameters, headers and form fields: name, value, on/off. Typing in the empty last row
 // adds a row; switched-off rows stay in the file but are not sent. Values may hold {{variables}}.
 import { Pair } from "../api";
+import { t } from "../i18n";
 import { CodeEditor } from "./CodeEditor";
 
 export function PairsTable({
   rows,
   onChange,
-  namePlaceholder = "Имя",
-  valuePlaceholder = "Значение",
+  namePlaceholder = t("Имя", "Name"),
+  valuePlaceholder = t("Значение", "Value"),
   onSubmit,
 }: {
   rows: Pair[];
@@ -30,7 +31,7 @@ export function PairsTable({
             <tr key={i} className={row.enabled ? "" : "off"}>
               <td className="chk">
                 {!fresh && (
-                  <input type="checkbox" checked={row.enabled} onChange={(e) => set(i, { enabled: e.target.checked })} title="Отправлять" />
+                  <input type="checkbox" checked={row.enabled} onChange={(e) => set(i, { enabled: e.target.checked })} title={t("Отправлять", "Send")} />
                 )}
               </td>
               <td>
@@ -41,7 +42,7 @@ export function PairsTable({
               </td>
               <td className="del">
                 {!fresh && (
-                  <button className="icon" title="Удалить" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
+                  <button className="icon" title={t("Удалить", "Delete")} onClick={() => onChange(rows.filter((_, j) => j !== i))}>
                     ×
                   </button>
                 )}

@@ -1,6 +1,7 @@
 // The request as it is stored in its file: method and address on top, the rest in tabs.
 import { useState } from "react";
 import { Auth, Body, Part, Request } from "../api";
+import { t } from "../i18n";
 import { key } from "../platform";
 import { missingVars, useVars } from "../vars";
 import { ChecksEditor } from "./ChecksEditor";
@@ -40,13 +41,13 @@ export function RequestEditor({
   const set = (patch: Partial<Request>) => onChange({ ...request, ...patch });
   const on = (rows: { enabled: boolean }[]) => rows.filter((r) => r.enabled).length;
   const tabs: [Tab, string, string | number | null][] = [
-    ["query", "Параметры", on(request.query) || null],
-    ["headers", "Заголовки", on(request.headers) || null],
-    ["auth", "Авторизация", request.auth.type === "none" ? null : "●"],
-    ["body", "Тело", request.body.type === "none" ? null : "●"],
-    ["checks", "Проверки", on(request.checks) + on(request.captures) || null],
-    ["scripts", "Скрипты", request.scripts.before.trim() || request.scripts.after.trim() ? "●" : null],
-    ["options", "Настройки", Object.values(request.options).some((v) => v != null) ? "●" : null],
+    ["query", t("Параметры", "Params"), on(request.query) || null],
+    ["headers", t("Заголовки", "Headers"), on(request.headers) || null],
+    ["auth", t("Авторизация", "Auth"), request.auth.type === "none" ? null : "●"],
+    ["body", t("Тело", "Body"), request.body.type === "none" ? null : "●"],
+    ["checks", t("Проверки", "Checks"), on(request.checks) + on(request.captures) || null],
+    ["scripts", t("Скрипты", "Scripts"), request.scripts.before.trim() || request.scripts.after.trim() ? "●" : null],
+    ["options", t("Настройки", "Settings"), Object.values(request.options).some((v) => v != null) ? "●" : null],
   ];
 
   return (
@@ -55,13 +56,13 @@ export function RequestEditor({
         <input
           className="req-name"
           value={request.name ?? ""}
-          placeholder={saved ?? "Черновик — не сохраняется"}
+          placeholder={saved ?? t("Черновик — не сохраняется", "Draft — not saved")}
           spellCheck={false}
           disabled={!saved}
           onChange={(e) => set({ name: e.target.value || null })}
         />
-        <button className="ghost small" onClick={onShowCode} title="Запрос в виде кода: curl, Python, JavaScript, Go и другие">
-          Код…
+        <button className="ghost small" onClick={onShowCode} title={t("Запрос в виде кода: curl, Python, JavaScript, Go и другие", "The request as code: curl, Python, JavaScript, Go and more")}>
+          {t("Код…", "Code…")}
         </button>
       </div>
       <div className="urlbar">
@@ -70,7 +71,7 @@ export function RequestEditor({
           mode="line"
           className="url"
           value={request.url}
-          placeholder="Адрес, {{base_url}}/users или вставьте команду curl"
+          placeholder={t("Адрес, {{base_url}}/users или вставьте команду curl", "URL, {{base_url}}/users, or paste a curl command")}
           // Only an empty address waits for typing. A blinking caret in WebKit on macOS costs
           // its GPU process ~120 MB while the window is in front, so it is not lit for nothing.
           autoFocus={!request.url}
@@ -78,13 +79,15 @@ export function RequestEditor({
           onSubmit={onSend}
           onPaste={onPasteCurl}
         />
-        <button className="primary" disabled={sending || !request.url.trim()} onClick={onSend} title={`Отправить (${key("↵")})`}>
-          Отправить
+        <button className="primary" disabled={sending || !request.url.trim()} onClick={onSend} title={t(`Отправить (${key("↵")})`, `Send (${key("↵")})`)}>
+          {t("Отправить", "Send")}
         </button>
       </div>
       {missing.length > 0 && (
         <div className="missing small">
-          Не заданы{vars.length === 0 ? " (откройте коллекцию или выберите окружение)" : ""}:{" "}
+          {vars.length === 0
+            ? t("Не заданы (откройте коллекцию или выберите окружение):", "Not set (open a collection or pick an environment):")
+            : t("Не заданы:", "Not set:")}{" "}
           {missing.map((name) => (
             <code key={name}>{`{{${name}}}`}</code>
           ))}
@@ -101,7 +104,7 @@ export function RequestEditor({
       <div className="tab-body scroll pad">
         {tab === "query" && <PairsTable rows={request.query} onChange={(query) => set({ query })} onSubmit={onSend} />}
         {tab === "headers" && (
-          <PairsTable rows={request.headers} onChange={(headers) => set({ headers })} namePlaceholder="Заголовок" onSubmit={onSend} />
+          <PairsTable rows={request.headers} onChange={(headers) => set({ headers })} namePlaceholder={t("Заголовок", "Header")} onSubmit={onSend} />
         )}
         {tab === "auth" && <AuthEditor request={request} env={env} sending={sending} onChange={(auth) => set({ auth })} />}
         {tab === "body" && <BodyEditor body={request.body} onChange={(body) => set({ body })} onSubmit={onSend} />}
@@ -119,29 +122,29 @@ export function RequestEditor({
         {tab === "options" && (
           <div className="form">
             <label>
-              <span>Перенаправления</span>
-              <TriState value={request.options.followRedirects} yes="переходить" no="не переходить" onChange={(followRedirects) => set({ options: { ...request.options, followRedirects } })} />
+              <span>{t("Перенаправления", "Redirects")}</span>
+              <TriState value={request.options.followRedirects} yes={t("переходить", "follow")} no={t("не переходить", "don't follow")} onChange={(followRedirects) => set({ options: { ...request.options, followRedirects } })} />
             </label>
             <label>
-              <span>Проверка сертификата</span>
-              <TriState value={request.options.verifyTls} yes="проверять" no="не проверять" onChange={(verifyTls) => set({ options: { ...request.options, verifyTls } })} />
+              <span>{t("Проверка сертификата", "Certificate verification")}</span>
+              <TriState value={request.options.verifyTls} yes={t("проверять", "verify")} no={t("не проверять", "don't verify")} onChange={(verifyTls) => set({ options: { ...request.options, verifyTls } })} />
             </label>
             <label>
-              <span>Cookie</span>
+              <span>{t("Cookie", "Cookies")}</span>
               <TriState
                 value={request.options.cookies ?? null}
-                yes="отправлять и запоминать"
-                no="без cookie"
+                yes={t("отправлять и запоминать", "send and remember")}
+                no={t("без cookie", "no cookies")}
                 onChange={(cookies) => set({ options: { ...request.options, cookies } })}
               />
             </label>
             <label>
-              <span>Ждать ответа, мс</span>
+              <span>{t("Ждать ответа, мс", "Response timeout, ms")}</span>
               <input
                 className="mono narrow"
                 inputMode="numeric"
                 value={request.options.timeoutMs ?? ""}
-                placeholder="без ограничения"
+                placeholder={t("без ограничения", "no limit")}
                 onChange={(e) => {
                   const n = parseInt(e.target.value.replace(/\D/g, ""), 10);
                   set({ options: { ...request.options, timeoutMs: Number.isFinite(n) ? n : null } });
@@ -158,10 +161,11 @@ export function RequestEditor({
 function ScriptsEditor({ scripts, onChange, onSubmit }: { scripts: Request["scripts"]; onChange: (s: Request["scripts"]) => void; onSubmit: () => void }) {
   return (
     <div className="scripts-editor">
-      <div className="section-head">До запроса</div>
+      <div className="section-head">{t("До запроса", "Before the request")}</div>
       <div className="hint">
-        Видит запрос как в файле, с <code>{"{{переменными}}"}</code>, и может его менять. Переменные из <code>vars.set</code> подставятся в этот же
-        запрос.
+        {t("Видит запрос как в файле, с", "Sees the request as in the file, with")} <code>{t("{{переменными}}", "{{variables}}")}</code>
+        {t(", и может его менять. Переменные из", ", and can change it. Variables from")} <code>vars.set</code>{" "}
+        {t("подставятся в этот же запрос.", "are filled into this same request.")}
       </div>
       <CodeEditor
         mode="js"
@@ -171,22 +175,31 @@ function ScriptsEditor({ scripts, onChange, onSubmit }: { scripts: Request["scri
         onChange={(before) => onChange({ ...scripts, before })}
         onSubmit={onSubmit}
       />
-      <div className="section-head">После ответа</div>
+      <div className="section-head">{t("После ответа", "After the response")}</div>
       <div className="hint">
-        <code>response.json()</code>, <code>response.status</code>, <code>response.headers.get(…)</code>. Тесты встают рядом с проверками, а{" "}
-        <code>vars.set</code> отдаёт значение другим запросам — они отправят этот сами, если значения ещё нет.
+        <code>response.json()</code>, <code>response.status</code>, <code>response.headers.get(…)</code>.{" "}
+        {t("Тесты встают рядом с проверками, а", "Tests show up next to the checks, and")} <code>vars.set</code>{" "}
+        {t(
+          "отдаёт значение другим запросам — они отправят этот сами, если значения ещё нет.",
+          "hands the value to other requests — they send this one themselves if the value is not there yet.",
+        )}
       </div>
       <CodeEditor
         mode="js"
         className="code script"
         value={scripts.after}
-        placeholder={'const order = response.json();\nvars.set("order_id", order.id);\ntest("заказ создан", () => expect(order.status).toBe("new"));'}
+        placeholder={t(
+          'const order = response.json();\nvars.set("order_id", order.id);\ntest("заказ создан", () => expect(order.status).toBe("new"));',
+          'const order = response.json();\nvars.set("order_id", order.id);\ntest("order created", () => expect(order.status).toBe("new"));',
+        )}
         onChange={(after) => onChange({ ...scripts, after })}
         onSubmit={onSubmit}
       />
       <div className="hint">
-        JavaScript в QuickJS, без файлов и сети, до 5 секунд. Работает и в <code>tsubamedo run</code>. Ещё есть <code>crypto.sha256</code>,{" "}
-        <code>crypto.hmac</code>, <code>btoa</code>/<code>atob</code>, <code>console.log</code> — в журнал под ответом.
+        {t("JavaScript в QuickJS, без файлов и сети, до 5 секунд. Работает и в", "JavaScript in QuickJS, with no files or network, up to 5 seconds. Works in")}{" "}
+        <code>tsubamedo run</code>
+        {t(". Ещё есть", " too. There are also")} <code>crypto.sha256</code>, <code>crypto.hmac</code>, <code>btoa</code>/<code>atob</code>,{" "}
+        <code>console.log</code> {t("— в журнал под ответом.", "— to the log under the response.")}
       </div>
     </div>
   );
@@ -195,7 +208,7 @@ function ScriptsEditor({ scripts, onChange, onSubmit }: { scripts: Request["scri
 function TriState({ value, yes, no, onChange }: { value: boolean | null; yes: string; no: string; onChange: (v: boolean | null) => void }) {
   return (
     <select value={value == null ? "" : value ? "yes" : "no"} onChange={(e) => onChange(e.target.value === "" ? null : e.target.value === "yes")}>
-      <option value="">как обычно</option>
+      <option value="">{t("как обычно", "default")}</option>
       <option value="yes">{yes}</option>
       <option value="no">{no}</option>
     </select>
@@ -219,52 +232,62 @@ function AuthEditor({ request, env, sending, onChange }: { request: Request; env
   return (
     <div className="form">
       <label>
-        <span>Тип</span>
+        <span>{t("Тип", "Type")}</span>
         <select value={auth.type} onChange={(e) => switchTo(e.target.value as Auth["type"])}>
-          <option value="none">Нет</option>
-          <option value="bearer">Bearer-токен</option>
-          <option value="basic">Basic: логин и пароль</option>
-          <option value="digest">Digest: логин и пароль</option>
+          <option value="none">{t("Нет", "None")}</option>
+          <option value="bearer">{t("Bearer-токен", "Bearer token")}</option>
+          <option value="basic">{t("Basic: логин и пароль", "Basic: username and password")}</option>
+          <option value="digest">{t("Digest: логин и пароль", "Digest: username and password")}</option>
           <option value="apikey">API key</option>
           <option value="oauth2">OAuth 2.0</option>
           <option value="awsv4">AWS Signature v4</option>
         </select>
       </label>
       {auth.type === "oauth2" && <OAuthEditor auth={auth} request={request} env={env} sending={sending} onChange={onChange} />}
-      {auth.type === "bearer" && <Field label="Токен" value={auth.token} onChange={(token) => onChange({ ...auth, token })} placeholder="{{token}}" />}
+      {auth.type === "bearer" && <Field label={t("Токен", "Token")} value={auth.token} onChange={(token) => onChange({ ...auth, token })} placeholder="{{token}}" />}
       {(auth.type === "basic" || auth.type === "digest") && (
         <>
-          <Field label="Логин" value={auth.username} onChange={(username) => onChange({ ...auth, username })} />
-          <Field label="Пароль" value={auth.password} onChange={(password) => onChange({ ...auth, password })} placeholder="{{password}}" />
+          <Field label={t("Логин", "Username")} value={auth.username} onChange={(username) => onChange({ ...auth, username })} />
+          <Field label={t("Пароль", "Password")} value={auth.password} onChange={(password) => onChange({ ...auth, password })} placeholder="{{password}}" />
         </>
       )}
       {auth.type === "apikey" && (
         <>
-          <Field label="Имя" value={auth.key} onChange={(k) => onChange({ ...auth, key: k })} />
-          <Field label="Значение" value={auth.value} onChange={(value) => onChange({ ...auth, value })} placeholder="{{api_key}}" />
+          <Field label={t("Имя", "Name")} value={auth.key} onChange={(k) => onChange({ ...auth, key: k })} />
+          <Field label={t("Значение", "Value")} value={auth.value} onChange={(value) => onChange({ ...auth, value })} placeholder="{{api_key}}" />
           <label>
-            <span>Куда</span>
+            <span>{t("Куда", "Add to")}</span>
             <select value={auth.location} onChange={(e) => onChange({ ...auth, location: e.target.value as "header" | "query" })}>
-              <option value="header">в заголовок</option>
-              <option value="query">в параметры адреса</option>
+              <option value="header">{t("в заголовок", "header")}</option>
+              <option value="query">{t("в параметры адреса", "query params")}</option>
             </select>
           </label>
         </>
       )}
       {auth.type === "awsv4" && (
         <>
-          <Field label="Ключ доступа" value={auth.accessKey} onChange={(accessKey) => onChange({ ...auth, accessKey })} placeholder="{{aws_access_key}}" />
-          <Field label="Секретный ключ" value={auth.secretKey} onChange={(secretKey) => onChange({ ...auth, secretKey })} placeholder="{{aws_secret_key}}" />
-          <Field label="Токен сессии" value={auth.sessionToken} onChange={(sessionToken) => onChange({ ...auth, sessionToken })} placeholder="для временных ключей" />
-          <Field label="Регион" value={auth.region} onChange={(region) => onChange({ ...auth, region })} placeholder="eu-west-1" />
-          <Field label="Сервис" value={auth.service} onChange={(service) => onChange({ ...auth, service })} placeholder="s3, execute-api, lambda…" />
-          <div className="hint">Запрос подписывается прямо перед отправкой: метод, путь, параметры, заголовки и тело. Для S3 добавляется хеш тела.</div>
+          <Field label={t("Ключ доступа", "Access key")} value={auth.accessKey} onChange={(accessKey) => onChange({ ...auth, accessKey })} placeholder="{{aws_access_key}}" />
+          <Field label={t("Секретный ключ", "Secret key")} value={auth.secretKey} onChange={(secretKey) => onChange({ ...auth, secretKey })} placeholder="{{aws_secret_key}}" />
+          <Field label={t("Токен сессии", "Session token")} value={auth.sessionToken} onChange={(sessionToken) => onChange({ ...auth, sessionToken })} placeholder={t("для временных ключей", "for temporary keys")} />
+          <Field label={t("Регион", "Region")} value={auth.region} onChange={(region) => onChange({ ...auth, region })} placeholder="eu-west-1" />
+          <Field label={t("Сервис", "Service")} value={auth.service} onChange={(service) => onChange({ ...auth, service })} placeholder="s3, execute-api, lambda…" />
+          <div className="hint">
+            {t(
+              "Запрос подписывается прямо перед отправкой: метод, путь, параметры, заголовки и тело. Для S3 добавляется хеш тела.",
+              "The request is signed right before sending: method, path, params, headers and body. For S3 the body hash is added.",
+            )}
+          </div>
         </>
       )}
       {auth.type === "digest" && (
-        <div className="hint">Запрос уходит без авторизации, сервер отвечает 401 с вызовом Digest, и запрос уходит ещё раз с ответом на него (MD5 или SHA-256).</div>
+        <div className="hint">
+          {t(
+            "Запрос уходит без авторизации, сервер отвечает 401 с вызовом Digest, и запрос уходит ещё раз с ответом на него (MD5 или SHA-256).",
+            "The request goes without authorization, the server answers 401 with a Digest challenge, and the request goes again with the answer to it (MD5 or SHA-256).",
+          )}
+        </div>
       )}
-      {auth.type !== "none" && auth.type !== "oauth2" && <div className="hint">Секреты лучше держать в переменных из файла *.local.toml — он не попадает в git.</div>}
+      {auth.type !== "none" && auth.type !== "oauth2" && <div className="hint">{t("Секреты лучше держать в переменных из файла *.local.toml — он не попадает в git.", "Secrets are best kept in variables from a *.local.toml file — it stays out of git.")}</div>}
     </div>
   );
 }
@@ -290,7 +313,8 @@ function BodyEditor({ body, onChange, onSubmit }: { body: Body; onChange: (b: Bo
       onChange({ ...body, content: JSON.stringify(JSON.parse(body.content), null, 2) + "\n" });
       setProblem(null);
     } catch (e) {
-      setProblem(/\{\{/.test(body.content) ? "С {{переменными}} вне кавычек JSON не разобрать — форматирование недоступно" : `Не JSON: ${(e as Error).message}`);
+      setProblem(/\{\{/.test(body.content) ? t("С {{переменными}} вне кавычек JSON не разобрать — форматирование недоступно", "JSON with {{variables}} outside quotes can't be parsed — formatting is unavailable")
+          : t(`Не JSON: ${(e as Error).message}`, `Not JSON: ${(e as Error).message}`));
     }
   };
   return (
@@ -299,12 +323,12 @@ function BodyEditor({ body, onChange, onSubmit }: { body: Body; onChange: (b: Bo
         <div className="seg">
           {(
             [
-              ["none", "Нет"],
+              ["none", t("Нет", "None")],
               ["json", "JSON"],
-              ["text", "Текст"],
-              ["form", "Форма"],
+              ["text", t("Текст", "Text")],
+              ["form", t("Форма", "Form")],
               ["multipart", "Multipart"],
-              ["file", "Файл"],
+              ["file", t("Файл", "File")],
             ] as [Body["type"], string][]
           ).map(([type, label]) => (
             <button key={type} className={body.type === type ? "on" : ""} onClick={() => switchTo(type)}>
@@ -314,7 +338,7 @@ function BodyEditor({ body, onChange, onSubmit }: { body: Body; onChange: (b: Bo
         </div>
         {body.type === "json" && (
           <button className="ghost" onClick={tidy}>
-            Форматировать
+            {t("Форматировать", "Format")}
           </button>
         )}
       </div>
@@ -324,7 +348,7 @@ function BodyEditor({ body, onChange, onSubmit }: { body: Body; onChange: (b: Bo
           mode={body.type}
           className="code"
           value={body.content}
-          placeholder={body.type === "json" ? '{"name": "{{name}}"}' : "Текст запроса"}
+          placeholder={body.type === "json" ? '{"name": "{{name}}"}' : t("Текст запроса", "Request text")}
           onChange={(content) => onChange({ ...body, content })}
           onSubmit={onSubmit}
         />
@@ -332,12 +356,12 @@ function BodyEditor({ body, onChange, onSubmit }: { body: Body; onChange: (b: Bo
       {body.type === "text" && (
         <Field label="Content-Type" value={body.contentType ?? ""} placeholder="text/plain; charset=utf-8" onChange={(v) => onChange({ ...body, contentType: v || null })} />
       )}
-      {body.type === "form" && <PairsTable rows={body.fields} onChange={(fields) => onChange({ ...body, fields })} namePlaceholder="Поле" onSubmit={onSubmit} />}
+      {body.type === "form" && <PairsTable rows={body.fields} onChange={(fields) => onChange({ ...body, fields })} namePlaceholder={t("Поле", "Field")} onSubmit={onSubmit} />}
       {body.type === "multipart" && <PartsTable parts={body.parts} onChange={(parts) => onChange({ ...body, parts })} />}
       {body.type === "file" && (
         <div className="form">
-          <Field label="Путь" value={body.path} placeholder="относительно папки запроса" onChange={(path) => onChange({ ...body, path })} />
-          <Field label="Content-Type" value={body.contentType ?? ""} placeholder="по расширению" onChange={(v) => onChange({ ...body, contentType: v || null })} />
+          <Field label={t("Путь", "Path")} value={body.path} placeholder={t("относительно папки запроса", "relative to the request's folder")} onChange={(path) => onChange({ ...body, path })} />
+          <Field label="Content-Type" value={body.contentType ?? ""} placeholder={t("по расширению", "by extension")} onChange={(v) => onChange({ ...body, contentType: v || null })} />
         </div>
       )}
     </div>
@@ -359,16 +383,16 @@ function PartsTable({ parts, onChange }: { parts: Part[]; onChange: (p: Part[]) 
             <tr key={i} className={p.enabled ? "" : "off"}>
               <td className="chk">{!fresh && <input type="checkbox" checked={p.enabled} onChange={(e) => set(i, { enabled: e.target.checked })} />}</td>
               <td>
-                <input className="mono" value={p.name} placeholder="Поле" spellCheck={false} onChange={(e) => set(i, { name: e.target.value })} />
+                <input className="mono" value={p.name} placeholder={t("Поле", "Field")} spellCheck={false} onChange={(e) => set(i, { name: e.target.value })} />
               </td>
               <td className="kind">
                 <select value={p.isFile ? "file" : "text"} onChange={(e) => set(i, { isFile: e.target.value === "file" })}>
-                  <option value="text">текст</option>
-                  <option value="file">файл</option>
+                  <option value="text">{t("текст", "text")}</option>
+                  <option value="file">{t("файл", "file")}</option>
                 </select>
               </td>
               <td>
-                <CodeEditor mode="line" className="field" value={p.value} placeholder={p.isFile ? "путь к файлу" : "Значение"} onChange={(value) => set(i, { value })} />
+                <CodeEditor mode="line" className="field" value={p.value} placeholder={p.isFile ? t("путь к файлу", "file path") : t("Значение", "Value")} onChange={(value) => set(i, { value })} />
               </td>
               <td className="del">
                 {!fresh && (

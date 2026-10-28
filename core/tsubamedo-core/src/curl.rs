@@ -14,7 +14,7 @@ pub fn parse(command: &str) -> Result<Request> {
     let mut words = words.into_iter().peekable();
     match words.next().as_deref() {
         Some("curl") => {}
-        _ => return Err(Error::Invalid("это не команда curl: она должна начинаться со слова curl".into())),
+        _ => return Err(Error::Invalid(tr!("это не команда curl: она должна начинаться со слова curl", "this is not a curl command: it must start with the word curl"))),
     }
 
     let mut cmd = Command::default();
@@ -45,7 +45,7 @@ pub fn parse(command: &str) -> Result<Request> {
 }
 
 fn missing(flag: &str) -> Error {
-    Error::Invalid(format!("у {flag} нет значения"))
+    Error::Invalid(tr!("у {flag} нет значения", "{flag} has no value"))
 }
 
 fn takes_value_short(flag: char) -> bool {
@@ -156,7 +156,7 @@ impl Command {
             "head" => self.head = true,
             "insecure" => self.insecure = true,
             "max-time" => {
-                let secs: f64 = value.parse().map_err(|_| Error::Invalid(format!("--max-time: «{value}» не число")))?;
+                let secs: f64 = value.parse().map_err(|_| Error::Invalid(tr!("--max-time: «{value}» не число", "--max-time: \"{value}\" is not a number")))?;
                 self.max_time_ms = Some((secs * 1000.0) as u64);
             }
             _ => {}
@@ -165,7 +165,7 @@ impl Command {
     }
 
     fn into_request(mut self) -> Result<Request> {
-        let url = self.url.take().ok_or_else(|| Error::Invalid("в команде нет адреса".into()))?;
+        let url = self.url.take().ok_or_else(|| Error::Invalid(tr!("в команде нет адреса", "the command has no URL")))?;
         let (url, mut query) = split_query(&url);
         let mut request = Request { url, ..Request::default() };
         let header = |headers: &[(String, String)], name: &str| {
@@ -300,7 +300,7 @@ fn split(command: &str) -> Result<Vec<String>> {
     let mut word = String::new();
     let mut in_word = false;
     let mut chars = command.chars().peekable();
-    let unclosed = || Error::Invalid("в команде не закрыта кавычка".into());
+    let unclosed = || Error::Invalid(tr!("в команде не закрыта кавычка", "unclosed quote in the command"));
     while let Some(c) = chars.next() {
         match c {
             '\\' => match chars.next() {
@@ -464,6 +464,10 @@ mod tests {
         assert!(parse("wget https://x").is_err());
         assert!(parse("curl -H 'oops").is_err());
         assert!(parse("curl -s").is_err());
+        crate::lang::in_language(true, || {
+            assert_eq!(parse("curl -H 'oops").unwrap_err().to_string(), "unclosed quote in the command");
+            assert_eq!(parse("curl -s").unwrap_err().to_string(), "the command has no URL");
+        });
     }
 
     #[test]

@@ -6,7 +6,7 @@
 
 use serde_json::Value;
 
-use super::{Environment, Format, Imported, Placed, Var, array_at, body_of, join_scripts, map_builtins, map_texts, path_name, split_query, str_at, text};
+use super::{Environment, Format, Imported, Placed, Var, array_at, body_of, join_scripts, map_builtins, map_texts, path_name, request_scripts, split_query, str_at, text};
 use crate::model::{ApiKeyLocation, Auth, AwsV4, Body, ClientAuth, Grant, OAuth2, Pair, Part, Request};
 use crate::Result;
 
@@ -32,7 +32,7 @@ pub fn collection(doc: &Value) -> Result<Imported> {
         .map(|v| Var::new(key(v), text(&v["value"]), str_at(v, "type") == "secret"))
         .collect();
     let mut root = Inherited::default();
-    c.inherit(doc, "из коллекции", &mut root);
+    c.inherit(doc, &tr!("из коллекции", "from the collection"), &mut root);
     c.walk(array_at(doc, "item"), &[], &root);
     let mut warnings = c.warnings;
     for v in &mut c.out {
@@ -52,7 +52,7 @@ pub fn environment(doc: &Value) -> Imported {
     let globals = str_at(doc, "_postman_variable_scope") == "globals";
     Imported {
         format: Format::PostmanEnvironment,
-        name: if globals { "Глобальные переменные".into() } else { name.clone() },
+        name: if globals { tr!("Глобальные переменные", "Global variables") } else { name.clone() },
         requests: Vec::new(),
         vars: if globals { vars.clone() } else { Vec::new() },
         environments: if globals { Vec::new() } else { vec![Environment { name, vars }] },
@@ -67,9 +67,9 @@ impl Converter {
             let name = str_at(item, "name").trim().to_string();
             if let Some(kids) = item.get("item").and_then(Value::as_array) {
                 let mut next = inherited.clone();
-                self.inherit(item, &format!("из папки «{name}»"), &mut next);
+                self.inherit(item, &tr!("из папки «{name}»", "from folder \"{name}\""), &mut next);
                 let mut path = folder.to_vec();
-                path.push(if name.is_empty() { "Папка".into() } else { name });
+                path.push(if name.is_empty() { tr!("Папка", "Folder") } else { name });
                 self.walk(kids, &path, &next);
             } else if let Some(r) = item.get("request") {
                 let mut request = self.request(r, inherited);
@@ -79,8 +79,8 @@ impl Converter {
                 let mut befores: Vec<(String, &str)> = inherited.before.iter().map(|(f, s)| (f.clone(), s.as_str())).collect();
                 let mut afters: Vec<(String, &str)> = inherited.after.iter().map(|(f, s)| (f.clone(), s.as_str())).collect();
                 let (before, after) = events(item);
-                befores.push(("запроса".into(), &before));
-                afters.push(("запроса".into(), &after));
+                befores.push((request_scripts().into(), &before));
+                afters.push((request_scripts().into(), &after));
                 request.scripts.before = join_scripts(&befores);
                 request.scripts.after = join_scripts(&afters);
                 self.out.push(Placed { folder: folder.to_vec(), request });
@@ -208,7 +208,10 @@ impl Converter {
                     "client_credentials" => Grant::ClientCredentials,
                     "password_credentials" => Grant::Password,
                     "implicit" => {
-                        self.warnings.push("OAuth 2.0 implicit из Postman перенесён как authorization code с PKCE: implicit устарел и не поддерживается".into());
+                        self.warnings.push(tr!(
+                            "OAuth 2.0 implicit из Postman перенесён как authorization code с PKCE: implicit устарел и не поддерживается",
+                            "OAuth 2.0 implicit from Postman became authorization code with PKCE: implicit is obsolete and not supported"
+                        ));
                         Grant::AuthorizationCode
                     }
                     _ => Grant::AuthorizationCode,
@@ -232,7 +235,10 @@ impl Converter {
                 })
             }
             other => {
-                self.warnings.push(format!("авторизация {other} из Postman пока не поддерживается — у таких запросов её нет"));
+                self.warnings.push(tr!(
+                    "авторизация {other} из Postman пока не поддерживается — у таких запросов её нет",
+                    "{other} authorization from Postman is not supported yet — such requests have none"
+                ));
                 Auth::None
             }
         }

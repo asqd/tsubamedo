@@ -53,8 +53,13 @@ h3 { font-size: 17px; margin: 0 0 6px; }
 .top-in { display: flex; align-items: center; justify-content: space-between; height: 56px; gap: 16px; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--fg); font-weight: 600; font-size: 17px; }
 .brand:hover { text-decoration: none; }
-nav { display: flex; gap: 20px; font-size: 15px; overflow-x: auto; }
+nav { display: flex; gap: 20px; font-size: 15px; overflow-x: auto; margin-left: auto; }
 nav a { color: var(--muted); white-space: nowrap; }
+/* RU · EN: the page's own language marked, the other one a link. */
+.lang { display: flex; align-items: center; gap: 5px; flex-shrink: 0; padding-left: 16px; border-left: 1px solid var(--line); font-size: 13px; font-weight: 600; letter-spacing: .03em; color: var(--faint); line-height: 1; }
+.lang [aria-current] { color: var(--fg); }
+.lang a { color: var(--muted); }
+.lang a:hover { color: var(--accent); }
 
 section.hero { margin-top: 72px; text-align: center; }
 .hero h1 { font-size: clamp(34px, 6vw, 56px); margin: 0 auto 18px; max-width: 820px; }
@@ -117,4 +122,8 @@ section.numbers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16p
   .files tr { display: block; border-bottom: 1px solid var(--line); padding: 6px 0; }
   .files td:empty { display: none; }
   .foot { flex-direction: column; }
+}
+/* Room for the language switcher on a phone: «Установка» follows «Скачать» on the page anyway. */
+@media (max-width: 420px) {
+  nav a[href="#install"] { display: none; }
 }

@@ -35,7 +35,7 @@ fn build(verify: bool, identity: Option<&Identity>) -> Result<ClientConfig, Stri
         None => builder.with_no_client_auth(),
         Some(id) => builder
             .with_client_auth_cert(id.chain.clone(), id.key.clone_key())
-            .map_err(|e| format!("клиентский сертификат {}: {e}", id.label))?,
+            .map_err(|e| tr!("клиентский сертификат {}: {e}", "client certificate {}: {e}", id.label))?,
     };
     config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Ok(config)

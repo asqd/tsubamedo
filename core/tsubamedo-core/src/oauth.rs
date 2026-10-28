@@ -145,23 +145,23 @@ pub async fn token(o: &OAuth2, store: &SharedTokens, options: &SendOptions, mode
                 // Servers that do not rotate refresh tokens leave the old one valid.
                 t.refresh_token = t.refresh_token.or(Some(refresh));
                 store.put(o, t.clone());
-                let note = Some(format!("OAuth 2.0: токен обновлён по refresh token{}", lasts(&t)));
+                let note = Some(tr!("OAuth 2.0: токен обновлён по refresh token{}", "OAuth 2.0: token refreshed with the refresh token{}", lasts(&t)));
                 return Ok(Got { token: t, fresh: true, note });
             }
-            Err(e) => note = Some(format!("OAuth 2.0: refresh token не подошёл ({}), токен получен заново", reason(&e))),
+            Err(e) => note = Some(tr!("OAuth 2.0: refresh token не подошёл ({}), токен получен заново", "OAuth 2.0: the refresh token was rejected ({}), got a new token", reason(&e))),
         }
     }
     let t = grant(o, &options).await?;
     store.put(o, t.clone());
-    let note = note.unwrap_or_else(|| format!("OAuth 2.0: получен новый токен ({}){}", describe(o.grant), lasts(&t)));
+    let note = note.unwrap_or_else(|| tr!("OAuth 2.0: получен новый токен ({}){}", "OAuth 2.0: got a new token ({}){}", describe(o.grant), lasts(&t)));
     Ok(Got { token: t, fresh: true, note: Some(note) })
 }
 
 fn describe(grant: Grant) -> &'static str {
     match grant {
-        Grant::AuthorizationCode => "вход в браузере",
+        Grant::AuthorizationCode => tr_static!("вход в браузере", "sign-in in the browser"),
         Grant::ClientCredentials => "client credentials",
-        Grant::Password => "по паролю",
+        Grant::Password => tr_static!("по паролю", "password"),
     }
 }
 
@@ -169,7 +169,11 @@ fn lasts(t: &Token) -> String {
     match t.expires_at {
         Some(at) => {
             let minutes = (at - t.obtained_at).max(0) / 60;
-            if minutes > 0 { format!(", действует {minutes} мин") } else { format!(", действует {} с", (at - t.obtained_at).max(0)) }
+            if minutes > 0 {
+                tr!(", действует {minutes} мин", ", valid for {minutes} min")
+            } else {
+                tr!(", действует {} с", ", valid for {} s", (at - t.obtained_at).max(0))
+            }
         }
         None => String::new(),
     }
@@ -185,17 +189,17 @@ fn reason(e: &Error) -> String {
 
 fn check(o: &OAuth2) -> Result<()> {
     let missing = if o.token_url.trim().is_empty() {
-        "адрес получения токена (token URL)"
+        tr_static!("адрес получения токена (token URL)", "the token URL")
     } else if o.client_id.trim().is_empty() {
         "client_id"
     } else if o.grant == Grant::AuthorizationCode && o.auth_url.trim().is_empty() {
-        "адрес входа (authorization URL)"
+        tr_static!("адрес входа (authorization URL)", "the authorization URL")
     } else if o.grant == Grant::Password && o.username.trim().is_empty() {
-        "имя пользователя"
+        tr_static!("имя пользователя", "the username")
     } else {
         return Ok(());
     };
-    Err(Error::OAuth(format!("не задан {missing}")))
+    Err(Error::OAuth(tr!("не задан {missing}", "{missing} is not set")))
 }
 
 /// Without the cookie jar (the token endpoint has nothing to do with the API's session) and
@@ -235,7 +239,7 @@ async fn grant(o: &OAuth2, options: &SendOptions) -> Result<Token> {
 
 /// A POST to the token endpoint; empty parameters are left out.
 async fn request_token(o: &OAuth2, params: &[(&str, &str)], options: &SendOptions) -> Result<Token> {
-    let url = parse_url(&o.token_url).map_err(|e| Error::OAuth(format!("адрес получения токена: {e}")))?;
+    let url = parse_url(&o.token_url).map_err(|e| Error::OAuth(tr!("адрес получения токена: {e}", "token URL: {e}")))?;
     let mut form: Vec<(&str, &str)> = params.iter().filter(|(_, v)| !v.is_empty()).copied().collect();
     let mut headers = vec![
         ("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string()),
@@ -264,8 +268,8 @@ async fn request_token(o: &OAuth2, params: &[(&str, &str)], options: &SendOption
         digest: None,
         aws: None,
     };
-    let response = http::send(&prepared, options).await.map_err(|e| Error::OAuth(format!("сервер токенов: {e}")))?;
-    let bytes = response.body.head(1 << 20).map_err(|e| Error::OAuth(format!("ответ сервера токенов: {e}")))?;
+    let response = http::send(&prepared, options).await.map_err(|e| Error::OAuth(tr!("сервер токенов: {e}", "token server: {e}")))?;
+    let bytes = response.body.head(1 << 20).map_err(|e| Error::OAuth(tr!("ответ сервера токенов: {e}", "token server response: {e}")))?;
     let text = String::from_utf8_lossy(&bytes);
     // JSON as the standard says; GitHub and old servers answer with a form.
     let fields: BTreeMap<String, Value> = match serde_json::from_str::<Value>(&text) {
@@ -282,10 +286,10 @@ async fn request_token(o: &OAuth2, params: &[(&str, &str)], options: &SendOption
         let why = match (field("error"), field("error_description")) {
             (Some(e), Some(d)) => format!("{e} — {d}"),
             (Some(e), None) => e,
-            _ if access_token.is_none() && response.status < 400 => "в ответе нет access_token".into(),
+            _ if access_token.is_none() && response.status < 400 => tr!("в ответе нет access_token", "no access_token in the response"),
             _ => text.chars().take(200).collect::<String>().trim().to_string(),
         };
-        return Err(Error::OAuth(format!("сервер токенов ответил {}: {why}", response.status)));
+        return Err(Error::OAuth(tr!("сервер токенов ответил {}: {why}", "the token server answered {}: {why}", response.status)));
     }
     let obtained_at = now();
     Ok(Token {
@@ -308,7 +312,7 @@ async fn sign_in(o: &OAuth2) -> Result<SignedIn> {
     let (listener, redirect_uri) = listen(&o.redirect_uri).await?;
     let state = random();
     let verifier = o.pkce.then(random);
-    let mut url = parse_url(&o.auth_url).map_err(|e| Error::OAuth(format!("адрес входа: {e}")))?;
+    let mut url = parse_url(&o.auth_url).map_err(|e| Error::OAuth(tr!("адрес входа: {e}", "authorization URL: {e}")))?;
     {
         let mut q = url.query_pairs_mut();
         q.append_pair("response_type", "code").append_pair("client_id", &o.client_id).append_pair("redirect_uri", &redirect_uri);
@@ -326,13 +330,13 @@ async fn sign_in(o: &OAuth2) -> Result<SignedIn> {
     open_browser(url.as_str())?;
     let params = tokio::time::timeout(SIGN_IN_WAIT, wait_for_code(&listener, &state))
         .await
-        .map_err(|_| Error::OAuth(format!("вход в браузере не завершён за {} минут", SIGN_IN_WAIT.as_secs() / 60)))??;
+        .map_err(|_| Error::OAuth(tr!("вход в браузере не завершён за {} минут", "sign-in in the browser not finished in {} minutes", SIGN_IN_WAIT.as_secs() / 60)))??;
     if let Some(error) = params.get("error") {
         let detail = params.get("error_description").map(|d| format!(" — {d}")).unwrap_or_default();
-        return Err(Error::OAuth(format!("вход отклонён: {error}{detail}")));
+        return Err(Error::OAuth(tr!("вход отклонён: {error}{detail}", "sign-in refused: {error}{detail}")));
     }
     if params.get("state") != Some(&state) {
-        return Err(Error::OAuth("в ответе входа чужой state — код пришёл не на этот вход".into()));
+        return Err(Error::OAuth(tr!("в ответе входа чужой state — код пришёл не на этот вход", "the sign-in answer has a foreign state — the code is not for this sign-in")));
     }
     let code = params.get("code").cloned().unwrap_or_default();
     Ok(SignedIn { code, redirect_uri, verifier })
@@ -350,20 +354,21 @@ fn random() -> String {
 async fn listen(redirect: &str) -> Result<(TcpListener, String)> {
     let redirect = redirect.trim();
     if redirect.is_empty() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| Error::OAuth(format!("не открыть порт для возврата из браузера: {e}")))?;
+        let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| Error::OAuth(tr!("не открыть порт для возврата из браузера: {e}", "cannot open a port for the return from the browser: {e}")))?;
         let port = listener.local_addr().map_err(|e| Error::OAuth(e.to_string()))?.port();
         return Ok((listener, format!("http://127.0.0.1:{port}/callback")));
     }
     let url = Url::parse(redirect).ok();
     let host = url.as_ref().and_then(Url::host_str).unwrap_or_default().to_string();
     let Some(url) = url.filter(|u| u.scheme() == "http" && matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]")) else {
-        return Err(Error::OAuth(format!(
-            "адрес возврата {redirect}: код ловится только на http://127.0.0.1:порт или http://localhost:порт — оставьте поле пустым или впишите такой адрес и добавьте его у провайдера"
+        return Err(Error::OAuth(tr!(
+            "адрес возврата {redirect}: код ловится только на http://127.0.0.1:порт или http://localhost:порт — оставьте поле пустым или впишите такой адрес и добавьте его у провайдера",
+            "redirect URL {redirect}: the code is caught only on http://127.0.0.1:port or http://localhost:port — leave the field empty or enter such an address and add it at the provider"
         )));
     };
     let port = url.port().unwrap_or(80);
     let bind = if host == "[::1]" { format!("[::1]:{port}") } else { format!("127.0.0.1:{port}") };
-    let listener = TcpListener::bind(&bind).await.map_err(|e| Error::OAuth(format!("порт {port} для адреса возврата не открыть: {e}")))?;
+    let listener = TcpListener::bind(&bind).await.map_err(|e| Error::OAuth(tr!("порт {port} для адреса возврата не открыть: {e}", "cannot open port {port} for the redirect URL: {e}")))?;
     Ok((listener, redirect.to_string()))
 }
 
@@ -371,7 +376,7 @@ async fn listen(redirect: &str) -> Result<(TcpListener, String)> {
 /// how it went.
 async fn wait_for_code(listener: &TcpListener, state: &str) -> Result<BTreeMap<String, String>> {
     loop {
-        let (mut stream, _) = listener.accept().await.map_err(|e| Error::OAuth(format!("возврат из браузера: {e}")))?;
+        let (mut stream, _) = listener.accept().await.map_err(|e| Error::OAuth(tr!("возврат из браузера: {e}", "return from the browser: {e}")))?;
         let mut head = Vec::new();
         let mut chunk = [0u8; 2048];
         while !head.windows(4).any(|w| w == b"\r\n\r\n") && head.len() < 16 << 10 {
@@ -392,9 +397,9 @@ async fn wait_for_code(listener: &TcpListener, state: &str) -> Result<BTreeMap<S
         }
         let ok = params.contains_key("code") && params.get("state").map(String::as_str) == Some(state);
         let (title, text) = if ok {
-            ("Вход выполнен", "Можно закрыть вкладку и вернуться в TsubameDo.")
+            (tr_static!("Вход выполнен", "Signed in"), tr_static!("Можно закрыть вкладку и вернуться в TsubameDo.", "You can close this tab and go back to TsubameDo."))
         } else {
-            ("Вход не удался", "Что случилось — в TsubameDo, под запросом.")
+            (tr_static!("Вход не удался", "Sign-in failed"), tr_static!("Что случилось — в TsubameDo, под запросом.", "What happened is in TsubameDo, under the request."))
         };
         let page = format!(
             "<!doctype html><meta charset=utf-8><title>TsubameDo</title><body style=\"font:16px -apple-system,system-ui,sans-serif;text-align:center;padding-top:20vh;color:#333\"><h2>{title}</h2><p>{text}</p></body>"
@@ -429,7 +434,20 @@ fn open_browser(url: &str) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| Error::OAuth(format!("не открыть браузер ({e}); адрес входа: {url}")))?;
+        .map_err(|e| Error::OAuth(tr!("не открыть браузер ({e}); адрес входа: {url}", "cannot open the browser ({e}); sign-in URL: {url}")))?;
     std::thread::spawn(move || child.wait());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn says_what_is_missing() {
+        let o = OAuth2::default();
+        assert_eq!(check(&o).unwrap_err().to_string(), "OAuth 2.0: не задан адрес получения токена (token URL)");
+        let english = crate::lang::in_language(true, || check(&o).unwrap_err().to_string());
+        assert_eq!(english, "OAuth 2.0: the token URL is not set");
+    }
 }

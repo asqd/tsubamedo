@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChangeKind, CollectionInfo, RequestItem } from "../api";
 import { ContextMenu, MenuItem } from "./ContextMenu";
-import { KIND } from "./GitPanel";
+import { KIND_LETTER, kindLabel } from "./GitPanel";
+import { noun } from "../format";
+import { t } from "../i18n";
 
 export type Kind = "request" | "folder";
 
@@ -111,9 +113,9 @@ export function RequestTree({
 
   const moveMenu = (kind: Kind, path: string): MenuItem => {
     const here = parentOf(path);
-    const targets = [{ path: "", label: "Корень коллекции", indent: 0 }, ...collection.folders.map((f) => ({ path: f, label: lastPart(f), indent: f.split("/").length }))];
+    const targets = [{ path: "", label: t("Корень коллекции", "Collection root"), indent: 0 }, ...collection.folders.map((f) => ({ path: f, label: lastPart(f), indent: f.split("/").length }))];
     return {
-      label: "Переместить в…",
+      label: t("Переместить в…", "Move to…"),
       submenu: targets
         .filter((t) => kind === "request" || !(t.path === path || t.path.startsWith(`${path}/`)))
         .map((t) => ({ label: t.label, indent: t.indent, disabled: t.path === here, onClick: () => ops.move(kind, path, t.path) })),
@@ -129,34 +131,39 @@ export function RequestTree({
     let items: MenuItem[];
     if (!row) {
       items = [
-        { label: "Новый запрос", onClick: () => startNewRequest("") },
-        { label: "Новая папка", onClick: () => startNewFolder("") },
+        { label: t("Новый запрос", "New request"), onClick: () => startNewRequest("") },
+        { label: t("Новая папка", "New folder"), onClick: () => startNewFolder("") },
         { separator: true, label: "" },
-        { label: "Запустить всю коллекцию", onClick: () => ops.run("") },
+        { label: t("Запустить всю коллекцию", "Run the whole collection"), onClick: () => ops.run("") },
       ];
     } else if (row.kind === "request") {
       items = [
-        { label: "Открыть", onClick: () => onSelect(row.path) },
-        { label: "Переименовать", onClick: () => setRenaming({ kind: "request", path: row.path }) },
-        { label: "Дублировать", onClick: () => ops.duplicate(row.path) },
+        { label: t("Открыть", "Open"), onClick: () => onSelect(row.path) },
+        { label: t("Переименовать", "Rename"), onClick: () => setRenaming({ kind: "request", path: row.path }) },
+        { label: t("Дублировать", "Duplicate"), onClick: () => ops.duplicate(row.path) },
         moveMenu("request", row.path),
         { separator: true, label: "" },
-        { label: "Удалить в Корзину", danger: true, confirm: `Удалить «${row.name}»? Файл уйдёт в Корзину.`, onClick: () => ops.remove("request", row.path) },
+        { label: t("Удалить в Корзину", "Move to Trash"), danger: true, confirm: t(`Удалить «${row.name}»? Файл уйдёт в Корзину.`, `Delete "${row.name}"? The file goes to the Trash.`), onClick: () => ops.remove("request", row.path) },
       ];
     } else {
       const count = collection.requests.filter((r) => r.id.startsWith(`${row.path}/`)).length;
       items = [
-        { label: "Запустить папку", disabled: count === 0, onClick: () => ops.run(row.path) },
+        { label: t("Запустить папку", "Run folder"), disabled: count === 0, onClick: () => ops.run(row.path) },
         { separator: true, label: "" },
-        { label: "Новый запрос здесь", onClick: () => startNewRequest(row.path) },
-        { label: "Новая папка внутри", onClick: () => startNewFolder(row.path) },
-        { label: "Переименовать", onClick: () => setRenaming({ kind: "folder", path: row.path }) },
+        { label: t("Новый запрос здесь", "New request here"), onClick: () => startNewRequest(row.path) },
+        { label: t("Новая папка внутри", "New folder inside"), onClick: () => startNewFolder(row.path) },
+        { label: t("Переименовать", "Rename"), onClick: () => setRenaming({ kind: "folder", path: row.path }) },
         moveMenu("folder", row.path),
         { separator: true, label: "" },
         {
-          label: "Удалить в Корзину",
+          label: t("Удалить в Корзину", "Move to Trash"),
           danger: true,
-          confirm: count ? `Удалить папку «${row.name}» и ${count} запр. в ней? Она уйдёт в Корзину.` : `Удалить папку «${row.name}»?`,
+          confirm: count
+            ? t(
+                `Удалить папку «${row.name}» и ${count} запр. в ней? Она уйдёт в Корзину.`,
+                `Delete the folder "${row.name}" and ${count} ${noun(count, ["запрос", "запроса", "запросов"], ["request", "requests"])} in it? It goes to the Trash.`,
+              )
+            : t(`Удалить папку «${row.name}»?`, `Delete the folder "${row.name}"?`),
           onClick: () => ops.remove("folder", row.path),
         },
       ];
@@ -229,8 +236,8 @@ export function RequestTree({
             >
               <span className="chev">{open ? "▾" : "▸"}</span>
               {label}
-              {marks.has(row.path) && <span className="gm gm-folder" title="Внутри есть изменения" />}
-              <button className="more" title="Действия" onClick={(e) => openMenu(e, row)}>
+              {marks.has(row.path) && <span className="gm gm-folder" title={t("Внутри есть изменения", "Has changes inside")} />}
+              <button className="more" title={t("Действия", "Actions")} onClick={(e) => openMenu(e, row)}>
                 ⋯
               </button>
             </div>
@@ -249,17 +256,17 @@ export function RequestTree({
             <span className={`m m-${method.toLowerCase()}`}>{method === "DELETE" ? "DEL" : method.slice(0, 4)}</span>
             {label}
             {marks.has(row.path) && (
-              <span className={`gm gm-${marks.get(row.path)}`} title={`С последнего коммита: ${KIND[marks.get(row.path)!].label}`}>
-                {KIND[marks.get(row.path)!].letter}
+              <span className={`gm gm-${marks.get(row.path)}`} title={t(`С последнего коммита: ${kindLabel(marks.get(row.path)!)}`, `Since the last commit: ${kindLabel(marks.get(row.path)!)}`)}>
+                {KIND_LETTER[marks.get(row.path)!]}
               </span>
             )}
-            <button className="more" title="Действия" onClick={(e) => openMenu(e, row)}>
+            <button className="more" title={t("Действия", "Actions")} onClick={(e) => openMenu(e, row)}>
               ⋯
             </button>
           </div>
         );
       })}
-      {rows.length === 0 && <div className="side-empty small faint">{filter ? "Ничего не нашлось" : "Пусто. Правый клик — новый запрос или папка."}</div>}
+      {rows.length === 0 && <div className="side-empty small faint">{filter ? t("Ничего не нашлось", "Nothing found") : t("Пусто. Правый клик — новый запрос или папка.", "Empty. Right-click for a new request or folder.")}</div>}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
   );

@@ -61,7 +61,7 @@ export function SettingsDialog({ collection, env, onClose }: { collection: Colle
 
   return (
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal settings-dialog" role="dialog" aria-label="Настройки" onKeyDown={(e) => e.key === "Escape" && onClose()}>
+      <div className="modal settings-dialog" role="dialog" aria-label={t("Настройки", "Settings")} onKeyDown={(e) => e.key === "Escape" && onClose()}>
         <h2>{t("Язык", "Language")}</h2>
         {language && (
           <fieldset className="choice">
@@ -79,35 +79,40 @@ export function SettingsDialog({ collection, env, onClose }: { collection: Colle
             ))}
           </fieldset>
         )}
-        <h2 className="section-gap">Прокси</h2>
-        <p className="faint small">Для всех коллекций на этом компьютере. Запросы на localhost и 127.0.0.1 всегда идут напрямую.</p>
+        <h2 className="section-gap">{t("Прокси", "Proxy")}</h2>
+        <p className="faint small">
+          {t(
+            "Для всех коллекций на этом компьютере. Запросы на localhost и 127.0.0.1 всегда идут напрямую.",
+            "For every collection on this computer. Requests to localhost and 127.0.0.1 always go direct.",
+          )}
+        </p>
         {proxy && (
           <fieldset className="choice">
             <label>
               <input type="radio" checked={proxy.mode === "system"} onChange={() => setProxy({ mode: "system" })} />
               <span>
-                Системный
+                {t("Системный", "System")}
                 <span className="faint small"> — {describeSystem(system)}</span>
               </span>
             </label>
             <label>
               <input type="radio" checked={proxy.mode === "custom"} onChange={() => setProxy(custom)} />
-              <span>Свой</span>
+              <span>{t("Свой", "Custom")}</span>
             </label>
             {proxy.mode === "custom" && (
               <div className="form proxy-form">
                 <label>
-                  <span>Адрес</span>
+                  <span>{t("Адрес", "Address")}</span>
                   <input
                     className="mono"
                     value={proxy.url}
-                    placeholder="proxy.corp:3128, http://логин:пароль@proxy:3128, socks5://proxy:1080"
+                    placeholder={t("proxy.corp:3128, http://логин:пароль@proxy:3128, socks5://proxy:1080", "proxy.corp:3128, http://user:password@proxy:3128, socks5://proxy:1080")}
                     spellCheck={false}
                     onChange={(e) => setProxy({ ...proxy, url: e.target.value })}
                   />
                 </label>
                 <label>
-                  <span>Без прокси</span>
+                  <span>{t("Без прокси", "No proxy")}</span>
                   <input
                     className="mono"
                     value={proxy.noProxy}
@@ -120,55 +125,61 @@ export function SettingsDialog({ collection, env, onClose }: { collection: Colle
             )}
             <label>
               <input type="radio" checked={proxy.mode === "none"} onChange={() => setProxy({ mode: "none" })} />
-              <span>Без прокси</span>
+              <span>{t("Без прокси", "No proxy")}</span>
             </label>
           </fieldset>
         )}
 
-        <h2 className="section-gap">Клиентские сертификаты</h2>
+        <h2 className="section-gap">{t("Клиентские сертификаты", "Client certificates")}</h2>
         {!collection ? (
-          <p className="faint small">Сертификаты задаются у коллекции — откройте её.</p>
+          <p className="faint small">{t("Сертификаты задаются у коллекции — откройте её.", "Certificates belong to a collection — open one.")}</p>
         ) : (
           <>
             <p className="faint small">
-              Для серверов, которые спрашивают сертификат (mutual TLS). Хранятся в tsubamedo.toml коллекции, поэтому пароль лучше записать
-              переменной <code>{"{{cert_password}}"}</code>, а значение — в tsubamedo.local.toml. PEM (ключ в том же файле или отдельно) или
-              .p12/.pfx.
+              {t(
+                "Для серверов, которые спрашивают сертификат (mutual TLS). Хранятся в tsubamedo.toml коллекции, поэтому пароль лучше записать переменной ",
+                "For servers that ask for a certificate (mutual TLS). They are kept in the collection's tsubamedo.toml, so better write the password as a variable ",
+              )}
+              <code>{"{{cert_password}}"}</code>
+              {t(
+                ", а значение — в tsubamedo.local.toml. PEM (ключ в том же файле или отдельно) или .p12/.pfx.",
+                " and put its value in tsubamedo.local.toml. PEM (key in the same file or separate) or .p12/.pfx.",
+              )}
             </p>
             {(certs ?? []).map((c, i) => (
               <div key={i} className="cert-card">
                 <div className="form">
                   <label>
-                    <span>Хост</span>
+                    <span>{t("Хост", "Host")}</span>
                     <input className="mono" value={c.host} placeholder="api.bank.test, *.bank.test, host:8443" spellCheck={false} onChange={(e) => setCert(i, { host: e.target.value })} />
                   </label>
                   <FileField
-                    label="Сертификат"
+                    label={t("Сертификат", "Certificate")}
                     value={c.cert}
-                    placeholder="certs/client.pem или client.p12"
+                    placeholder={t("certs/client.pem или client.p12", "certs/client.pem or client.p12")}
                     onChange={(cert) => setCert(i, { cert })}
                     onPick={async () => {
-                      const path = await pickCertFile("Клиентский сертификат");
+                      const path = await pickCertFile(t("Клиентский сертификат", "Client certificate"));
                       if (path) setCert(i, { cert: relative(path) });
                     }}
                   />
                   <FileField
-                    label="Ключ"
+                    label={t("Ключ", "Key")}
                     value={c.key}
-                    placeholder="если ключ в отдельном файле"
+                    placeholder={t("если ключ в отдельном файле", "if the key is in a separate file")}
                     onChange={(key) => setCert(i, { key })}
                     onPick={async () => {
-                      const path = await pickCertFile("Закрытый ключ");
+                      const path = await pickCertFile(t("Закрытый ключ", "Private key"));
                       if (path) setCert(i, { key: relative(path) });
                     }}
                   />
                   <label>
-                    <span>Пароль</span>
+                    <span>{t("Пароль", "Password")}</span>
                     <input className="mono" value={c.passphrase} placeholder="{{cert_password}}" spellCheck={false} onChange={(e) => setCert(i, { passphrase: e.target.value })} />
                   </label>
                   {status[i]?.text && <div className={`hint ${status[i].ok ? "good-text" : "bad-text"}`}>{(status[i].ok ? "✓ " : "✗ ") + status[i].text}</div>}
                 </div>
-                <button className="icon" title="Убрать сертификат" onClick={() => {
+                <button className="icon" title={t("Убрать сертификат", "Remove certificate")} onClick={() => {
                   setCerts((list) => list && list.filter((_, j) => j !== i));
                   setStatus((s) => s.filter((_, j) => j !== i));
                 }}>
@@ -177,17 +188,17 @@ export function SettingsDialog({ collection, env, onClose }: { collection: Colle
               </div>
             ))}
             <button className="ghost small" onClick={() => setCerts((list) => [...(list ?? []), { host: "", cert: "", key: "", passphrase: "" }])}>
-              + Добавить сертификат
+              + {t("Добавить сертификат", "Add certificate")}
             </button>
           </>
         )}
         {problem && <div className="error-box small">{problem}</div>}
         <div className="modal-actions">
           <button onClick={onClose} disabled={busy}>
-            Отмена
+            {t("Отмена", "Cancel")}
           </button>
           <button className="primary" onClick={save} disabled={busy}>
-            {busy ? "Проверяю…" : "Сохранить"}
+            {busy ? t("Проверяю…", "Checking…") : t("Сохранить", "Save")}
           </button>
         </div>
       </div>
@@ -202,7 +213,7 @@ function FileField({ label, value, placeholder, onChange, onPick }: { label: str
       <span className="file-field">
         <input className="mono" value={value} placeholder={placeholder} spellCheck={false} title={home(value)} onChange={(e) => onChange(e.target.value)} />
         <button type="button" className="small" onClick={onPick}>
-          Выбрать…
+          {t("Выбрать…", "Choose…")}
         </button>
       </span>
     </label>
@@ -212,14 +223,14 @@ function FileField({ label, value, placeholder, onChange, onPick }: { label: str
 function describeSystem(s: SystemProxy | null): string {
   if (!s) return "…";
   const parts: string[] = [];
-  if (s.http && s.http === s.https) parts.push(`${s.http} для HTTP и HTTPS`);
+  if (s.http && s.http === s.https) parts.push(t(`${s.http} для HTTP и HTTPS`, `${s.http} for HTTP and HTTPS`));
   else {
-    if (s.http) parts.push(`${s.http} для HTTP`);
-    if (s.https) parts.push(`${s.https} для HTTPS`);
+    if (s.http) parts.push(t(`${s.http} для HTTP`, `${s.http} for HTTP`));
+    if (s.https) parts.push(t(`${s.https} для HTTPS`, `${s.https} for HTTPS`));
   }
   if (s.socks) parts.push(`SOCKS ${s.socks.replace("socks5://", "")}`);
-  if (s.pac != null) parts.push("автоматическая настройка (PAC) не выполняется");
-  if (parts.length === 0) return "сейчас не задан, запросы идут напрямую";
-  const bypass = s.bypass.length ? ` · без прокси: ${s.bypass.join(", ")}` : "";
+  if (s.pac != null) parts.push(t("автоматическая настройка (PAC) не выполняется", "automatic configuration (PAC) is not run"));
+  if (parts.length === 0) return t("сейчас не задан, запросы идут напрямую", "not set now, requests go direct");
+  const bypass = s.bypass.length ? t(` · без прокси: ${s.bypass.join(", ")}`, ` · no proxy for: ${s.bypass.join(", ")}`) : "";
   return `${parts.join(", ")}${bypass} (${s.source})`;
 }

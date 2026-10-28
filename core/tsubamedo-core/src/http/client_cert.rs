@@ -114,7 +114,7 @@ fn cached(spec: &CertSpec, base: &Path) -> Result<Arc<Identity>, String> {
 
 fn load(spec: &CertSpec, base: &Path) -> Result<Identity, String> {
     if spec.cert.trim().is_empty() {
-        return Err("не указан файл сертификата".into());
+        return Err(tr!("не указан файл сертификата", "no certificate file given"));
     }
     let cert_path = resolve(&spec.cert, base);
     let label = cert_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -128,7 +128,7 @@ fn load(spec: &CertSpec, base: &Path) -> Result<Identity, String> {
     };
     let chain: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(&pem).filter_map(Result::ok).collect();
     if chain.is_empty() {
-        return Err(format!("{label}: в файле нет сертификата (BEGIN CERTIFICATE)"));
+        return Err(tr!("{label}: в файле нет сертификата (BEGIN CERTIFICATE)", "{label}: no certificate in the file (BEGIN CERTIFICATE)"));
     }
     let key_pem = if spec.key.trim().is_empty() {
         pem
@@ -140,13 +140,16 @@ fn load(spec: &CertSpec, base: &Path) -> Result<Identity, String> {
         Ok(key) => key,
         Err(_) if String::from_utf8_lossy(&key_pem).contains("ENCRYPTED") => {
             if spec.passphrase.is_empty() {
-                return Err(format!("{label}: ключ зашифрован, нужен passphrase"));
+                return Err(tr!("{label}: ключ зашифрован, нужен passphrase", "{label}: the key is encrypted, a passphrase is needed"));
             }
             let key_path = if spec.key.trim().is_empty() { cert_path.clone() } else { resolve(&spec.key, base) };
             let plain = openssl(&["pkey", "-in"], &key_path, &spec.passphrase).map_err(|e| format!("{label}: {e}"))?;
-            PrivateKeyDer::from_pem_slice(&plain).map_err(|_| format!("{label}: openssl не отдал ключ"))?
+            PrivateKeyDer::from_pem_slice(&plain).map_err(|_| tr!("{label}: openssl не отдал ключ", "{label}: openssl did not give the key"))?
         }
-        Err(_) => return Err(format!("{label}: нет закрытого ключа — укажите key или файл, где есть и ключ")),
+        Err(_) => return Err(tr!(
+                "{label}: нет закрытого ключа — укажите key или файл, где есть и ключ",
+                "{label}: no private key — give key or a file that has the key too"
+            )),
     };
     Ok(Identity { chain, key, label })
 }
@@ -162,7 +165,7 @@ fn openssl(args: &[&str], file: &Path, passphrase: &str) -> Result<Vec<u8>, Stri
         }
         c.output()
     };
-    let out = run(false).map_err(|e| format!("нужен openssl, чтобы прочитать этот файл ({e})"))?;
+    let out = run(false).map_err(|e| tr!("нужен openssl, чтобы прочитать этот файл ({e})", "openssl is needed to read this file ({e})"))?;
     if out.status.success() && !out.stdout.is_empty() {
         return Ok(out.stdout);
     }
@@ -174,9 +177,17 @@ fn openssl(args: &[&str], file: &Path, passphrase: &str) -> Result<Vec<u8>, Stri
     }
     let why = String::from_utf8_lossy(&out.stderr);
     if why.contains("mac verify failure") || why.contains("bad decrypt") || why.contains("invalid password") || why.contains("Invalid password") {
-        return Err(if passphrase.is_empty() { "файл под паролем, нужен passphrase".into() } else { "неверный passphrase".into() });
+        return Err(if passphrase.is_empty() {
+            tr!("файл под паролем, нужен passphrase", "the file is password-protected, a passphrase is needed")
+        } else {
+            tr!("неверный passphrase", "wrong passphrase")
+        });
     }
-    Err(format!("openssl не прочитал файл: {}", why.lines().next().unwrap_or("неизвестная ошибка").trim()))
+    Err(tr!(
+        "openssl не прочитал файл: {}",
+        "openssl could not read the file: {}",
+        why.lines().next().unwrap_or(tr_static!("неизвестная ошибка", "unknown error")).trim()
+    ))
 }
 
 #[cfg(test)]

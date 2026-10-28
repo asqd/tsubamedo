@@ -1,0 +1,4 @@
+name = "Shop"
+
+[vars]
+token = "demo-token"

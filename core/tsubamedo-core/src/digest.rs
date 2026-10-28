@@ -19,14 +19,14 @@ pub fn answer(challenge: &str, method: &str, uri: &str, body: &[u8], username: &
     let p = params(challenge);
     let get = |key: &str| p.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
     let realm = get("realm").unwrap_or_default();
-    let nonce = get("nonce").ok_or("в запросе Digest от сервера нет nonce")?;
+    let nonce = get("nonce").ok_or(tr_static!("в запросе Digest от сервера нет nonce", "the server's Digest challenge has no nonce"))?;
     let algorithm = get("algorithm").unwrap_or("MD5");
     let (algo, sess) = match algorithm.to_ascii_uppercase().as_str() {
         "MD5" => (Algo::Md5, false),
         "MD5-SESS" => (Algo::Md5, true),
         "SHA-256" => (Algo::Sha256, false),
         "SHA-256-SESS" => (Algo::Sha256, true),
-        other => return Err(format!("Digest: алгоритм {other} не поддерживается (есть MD5 и SHA-256)")),
+        other => return Err(tr!("Digest: алгоритм {other} не поддерживается (есть MD5 и SHA-256)", "Digest: algorithm {other} is not supported (MD5 and SHA-256 are)")),
     };
     let qops: Vec<&str> = get("qop").map(|q| q.split(',').map(str::trim).collect()).unwrap_or_default();
     let qop = if qops.contains(&"auth") {
@@ -36,7 +36,7 @@ pub fn answer(challenge: &str, method: &str, uri: &str, body: &[u8], username: &
     } else if qops.is_empty() {
         None
     } else {
-        return Err(format!("Digest: qop {} не поддерживается", qops.join(", ")));
+        return Err(tr!("Digest: qop {} не поддерживается", "Digest: qop {} is not supported", qops.join(", ")));
     };
     let hash = |s: &str| algo.hex(s.as_bytes());
     let nc = "00000001";

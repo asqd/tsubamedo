@@ -2,6 +2,7 @@
 // the app's data folder and renews it; here it can be got anew or forgotten.
 import { useEffect, useRef, useState } from "react";
 import { api, OAuth2, Request, TokenInfo } from "../api";
+import { lang, t } from "../i18n";
 import { CodeEditor } from "./CodeEditor";
 
 type Settings = { type: "oauth2" } & OAuth2;
@@ -68,7 +69,8 @@ export function OAuthEditor({
       setToken(await api.oauthToken(sendId, request, env));
     } catch (e) {
       const message = (e as Error).message;
-      if (message !== "Отменено") setProblem(message);
+      // The core says it in the window's language.
+      if (message !== "Отменено" && message !== "Cancelled" && message !== "Canceled") setProblem(message);
     } finally {
       setBusy(null);
     }
@@ -81,55 +83,55 @@ export function OAuthEditor({
   return (
     <>
       <label>
-        <span>Как получить токен</span>
+        <span>{t("Как получить токен", "How to get the token")}</span>
         <select value={auth.grant} onChange={(e) => set({ grant: e.target.value as OAuth2["grant"] })}>
-          <option value="authorization_code">Вход в браузере (authorization code)</option>
+          <option value="authorization_code">{t("Вход в браузере (authorization code)", "Sign-in in the browser (authorization code)")}</option>
           <option value="client_credentials">Client credentials</option>
-          <option value="password">Логин и пароль (password)</option>
+          <option value="password">{t("Логин и пароль (password)", "Username and password (password)")}</option>
         </select>
       </label>
-      {code && <Field label="Адрес входа" value={auth.authUrl} onChange={(authUrl) => set({ authUrl })} placeholder="https://id.example.com/authorize" />}
-      <Field label="Адрес токена" value={auth.tokenUrl} onChange={(tokenUrl) => set({ tokenUrl })} placeholder="https://id.example.com/oauth/token" />
+      {code && <Field label={t("Адрес входа", "Authorization URL")} value={auth.authUrl} onChange={(authUrl) => set({ authUrl })} placeholder="https://id.example.com/authorize" />}
+      <Field label={t("Адрес токена", "Token URL")} value={auth.tokenUrl} onChange={(tokenUrl) => set({ tokenUrl })} placeholder="https://id.example.com/oauth/token" />
       <Field label="Client ID" value={auth.clientId} onChange={(clientId) => set({ clientId })} placeholder="{{client_id}}" />
       <Field
         label="Client secret"
         value={auth.clientSecret}
         onChange={(clientSecret) => set({ clientSecret })}
-        placeholder={code ? "не нужен приложению с PKCE" : "{{client_secret}}"}
+        placeholder={code ? t("не нужен приложению с PKCE", "not needed by an app with PKCE") : "{{client_secret}}"}
       />
       {auth.grant === "password" && (
         <>
-          <Field label="Логин" value={auth.username} onChange={(username) => set({ username })} />
-          <Field label="Пароль" value={auth.password} onChange={(password) => set({ password })} placeholder="{{password}}" />
+          <Field label={t("Логин", "Username")} value={auth.username} onChange={(username) => set({ username })} />
+          <Field label={t("Пароль", "Password")} value={auth.password} onChange={(password) => set({ password })} placeholder="{{password}}" />
         </>
       )}
-      <Field label="Scope" value={auth.scope} onChange={(scope) => set({ scope })} placeholder="через пробел: orders:read profile" />
+      <Field label="Scope" value={auth.scope} onChange={(scope) => set({ scope })} placeholder={t("через пробел: orders:read profile", "space-separated: orders:read profile")} />
       <details className="oauth-more">
-        <summary className="faint small">Ещё: audience, адрес возврата, PKCE, как передавать секрет</summary>
+        <summary className="faint small">{t("Ещё: audience, адрес возврата, PKCE, как передавать секрет", "More: audience, redirect URL, PKCE, how to send the secret")}</summary>
         <div className="form">
-          <Field label="Audience" value={auth.audience} onChange={(audience) => set({ audience })} placeholder="нужен Auth0 и некоторым другим" />
+          <Field label="Audience" value={auth.audience} onChange={(audience) => set({ audience })} placeholder={t("нужен Auth0 и некоторым другим", "needed by Auth0 and a few others")} />
           {code && (
             <>
               <Field
-                label="Адрес возврата"
+                label={t("Адрес возврата", "Redirect URL")}
                 value={auth.redirectUri}
                 onChange={(redirectUri) => set({ redirectUri })}
-                placeholder="http://127.0.0.1:<свободный порт>/callback"
+                placeholder={t("http://127.0.0.1:<свободный порт>/callback", "http://127.0.0.1:<free port>/callback")}
               />
               <label>
                 <span>PKCE</span>
                 <select value={auth.pkce ? "on" : "off"} onChange={(e) => set({ pkce: e.target.value === "on" })}>
-                  <option value="on">да, S256</option>
-                  <option value="off">нет</option>
+                  <option value="on">{t("да, S256", "yes, S256")}</option>
+                  <option value="off">{t("нет", "no")}</option>
                 </select>
               </label>
             </>
           )}
           <label>
-            <span>Client ID и секрет</span>
+            <span>{t("Client ID и секрет", "Client ID and secret")}</span>
             <select value={auth.clientAuth} onChange={(e) => set({ clientAuth: e.target.value as OAuth2["clientAuth"] })}>
-              <option value="basic">в заголовке Authorization: Basic</option>
-              <option value="body">в теле запроса токена</option>
+              <option value="basic">{t("в заголовке Authorization: Basic", "in the Authorization: Basic header")}</option>
+              <option value="body">{t("в теле запроса токена", "in the body of the token request")}</option>
             </select>
           </label>
         </div>
@@ -138,29 +140,29 @@ export function OAuthEditor({
         <div className="small">
           {token ? (
             <>
-              <span className="good-text">✓</span> Токен <code>{token.preview}</code>
+              <span className="good-text">✓</span> {t("Токен", "Token")} <code>{token.preview}</code>
               <span className="muted"> · {describe(token)}</span>
             </>
           ) : (
-            <span className="muted">Токена ещё нет — получу при отправке.</span>
+            <span className="muted">{t("Токена ещё нет — получу при отправке.", "No token yet — will get one when sending.")}</span>
           )}
         </div>
         <div className="oauth-actions">
           {busy ? (
             <>
-              <span className="faint small">{code ? "Жду вход в браузере…" : "Получаю…"}</span>
+              <span className="faint small">{code ? t("Жду вход в браузере…", "Waiting for sign-in in the browser…") : t("Получаю…", "Getting…")}</span>
               <button className="small" onClick={() => api.cancel(busy)}>
-                Отмена
+                {t("Отмена", "Cancel")}
               </button>
             </>
           ) : (
             <>
-              <button className="small" onClick={getNew} disabled={sending} title="Получить токен заново, не дожидаясь, пока этот истечёт">
-                {token ? "Получить новый" : "Получить сейчас"}
+              <button className="small" onClick={getNew} disabled={sending} title={t("Получить токен заново, не дожидаясь, пока этот истечёт", "Get a new token now, without waiting for this one to expire")}>
+                {token ? t("Получить новый", "Get new") : t("Получить сейчас", "Get now")}
               </button>
               {token && (
-                <button className="small ghost" onClick={forget} title="Удалить сохранённый токен">
-                  Забыть
+                <button className="small ghost" onClick={forget} title={t("Удалить сохранённый токен", "Delete the saved token")}>
+                  {t("Забыть", "Forget")}
                 </button>
               )}
             </>
@@ -170,23 +172,37 @@ export function OAuthEditor({
       </div>
       <div className="hint">
         {code
-          ? "Браузер откроет страницу входа, а код вернётся на этот компьютер. По RFC 8252 провайдер принимает любой порт на 127.0.0.1; если ему нужен точный адрес — впишите его в «Адрес возврата» и добавьте у провайдера."
-          : "Токен запрашивается перед первой отправкой и живёт, пока не истечёт."}{" "}
-        Истёкший обновляется по refresh token; если сервер ответил 401 на сохранённый, запрос уйдёт ещё раз с новым. Токены хранятся в папке
-        данных приложения, не в коллекции.
+          ? t(
+              "Браузер откроет страницу входа, а код вернётся на этот компьютер. По RFC 8252 провайдер принимает любой порт на 127.0.0.1; если ему нужен точный адрес — впишите его в «Адрес возврата» и добавьте у провайдера.",
+              'The browser opens the sign-in page, and the code comes back to this computer. Under RFC 8252 the provider accepts any port on 127.0.0.1; if it needs an exact address, enter it in "Redirect URL" and add it at the provider.',
+            )
+          : t("Токен запрашивается перед первой отправкой и живёт, пока не истечёт.", "The token is requested before the first send and lives until it expires.")}{" "}
+        {t(
+          "Истёкший обновляется по refresh token; если сервер ответил 401 на сохранённый, запрос уйдёт ещё раз с новым. Токены хранятся в папке данных приложения, не в коллекции.",
+          "An expired one is renewed with the refresh token; if the server answers 401 to a saved one, the request goes again with a new one. Tokens are kept in the app's data folder, not in the collection.",
+        )}
       </div>
     </>
   );
 }
 
-function describe(t: TokenInfo): string {
-  const parts = [`получен ${new Date(t.obtainedAt * 1000).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}`];
-  if (t.expiresAt != null) {
-    const left = t.expiresAt - Date.now() / 1000;
-    parts.push(left <= 0 ? "истёк" : left < 120 ? `ещё ${Math.round(left)} с` : left < 7200 ? `ещё ${Math.round(left / 60)} мин` : `ещё ${Math.round(left / 3600)} ч`);
+function describe(token: TokenInfo): string {
+  const at = new Date(token.obtainedAt * 1000).toLocaleTimeString(lang() === "en" ? "en-US" : "ru", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const parts = [t(`получен ${at}`, `obtained ${at}`)];
+  if (token.expiresAt != null) {
+    const left = token.expiresAt - Date.now() / 1000;
+    parts.push(
+      left <= 0
+        ? t("истёк", "expired")
+        : left < 120
+          ? t(`ещё ${Math.round(left)} с`, `${Math.round(left)} s left`)
+          : left < 7200
+            ? t(`ещё ${Math.round(left / 60)} мин`, `${Math.round(left / 60)} min left`)
+            : t(`ещё ${Math.round(left / 3600)} ч`, `${Math.round(left / 3600)} h left`),
+    );
   }
-  if (t.hasRefresh) parts.push("есть refresh token");
-  if (t.scope) parts.push(`scope: ${t.scope}`);
+  if (token.hasRefresh) parts.push(t("есть refresh token", "has a refresh token"));
+  if (token.scope) parts.push(`scope: ${token.scope}`);
   return parts.join(" · ");
 }
 

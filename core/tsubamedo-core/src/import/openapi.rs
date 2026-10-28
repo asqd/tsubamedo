@@ -70,11 +70,14 @@ impl Spec<'_> {
         match servers.first() {
             None => {
                 vars.push(Var::new("base_url", "http://localhost", false));
-                self.warnings.push("в описании нет адреса сервера — в base_url записан http://localhost".into());
+                self.warnings.push(tr!(
+                    "в описании нет адреса сервера — в base_url записан http://localhost",
+                    "the description has no server address — base_url is set to http://localhost"
+                ));
             }
             Some((url, _)) => {
                 if !url.contains("://") {
-                    self.warnings.push(format!("адрес сервера «{url}» без хоста — допишите его в base_url"));
+                    self.warnings.push(tr!("адрес сервера «{url}» без хоста — допишите его в base_url", "the server address \"{url}\" has no host — add it to base_url"));
                 }
                 vars.push(Var::new("base_url", url.clone(), false));
             }
@@ -249,7 +252,7 @@ impl Spec<'_> {
                 }
             }
             (kind, scheme) => {
-                self.warnings.push(format!("схема авторизации {kind} {scheme} не перенесена"));
+                self.warnings.push(tr!("схема авторизации {kind} {scheme} не перенесена", "the {kind} {scheme} authorization scheme was not carried over"));
                 Auth::None
             }
         }
@@ -398,7 +401,7 @@ impl Spec<'_> {
         if let Value::Object(map) = &mut converted {
             map.insert("$schema".into(), json!(DIALECT));
         }
-        let file = format!("{}.json", file_name(&format!("{operation} ответ")));
+        let file = format!("{}.json", file_name(&tr!("{operation} ответ", "{operation} response")));
         self.files.push((format!("{SCHEMAS}/{file}"), serde_json::to_string_pretty(&converted).unwrap_or_default() + "\n"));
         Some(file)
     }
@@ -508,16 +511,19 @@ impl Spec<'_> {
             let Some(r) = current.get("$ref").and_then(Value::as_str) else { return current };
             let Some(pointer) = r.strip_prefix('#') else {
                 self.warnings.push(if r.starts_with("http://") || r.starts_with("https://") {
-                    format!("ссылки по сети не загружаются: {r}")
+                    tr!("ссылки по сети не загружаются: {r}", "references over the network are not loaded: {r}")
                 } else {
-                    format!("ссылка на другой файл {r} не прочитана: импортируйте само описание файлом, а не текстом")
+                    tr!(
+                        "ссылка на другой файл {r} не прочитана: импортируйте само описание файлом, а не текстом",
+                        "the reference to another file {r} was not read: import the description as a file, not as text"
+                    )
                 });
                 return Value::Null;
             };
             match self.doc.pointer(pointer) {
                 Some(target) => current = target.clone(),
                 None => {
-                    self.warnings.push(format!("ссылка {r} никуда не ведёт"));
+                    self.warnings.push(tr!("ссылка {r} никуда не ведёт", "the reference {r} leads nowhere"));
                     return Value::Null;
                 }
             }

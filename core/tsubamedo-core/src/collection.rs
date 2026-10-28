@@ -76,7 +76,7 @@ impl Collection {
             .and_then(Item::as_str)
             .map(str::to_string)
             .or_else(|| root.canonicalize().ok()?.file_name().map(|n| n.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| "Коллекция".into());
+            .unwrap_or_else(|| tr!("Коллекция", "Collection"));
         let mut collection = Collection { root: root.clone(), name, requests: Vec::new(), folders: Vec::new(), broken: Vec::new() };
         collection.walk(&root, true);
         Ok(collection)
@@ -114,19 +114,23 @@ impl Collection {
     /// Every variable with the file it finally comes from, for hints in the editor.
     pub fn var_sources(&self, env: Option<&str>) -> Result<Vec<VarSource>> {
         let mut layers = vec![
-            (self.root.join(MANIFEST), true, "коллекция".to_string(), false),
-            (self.root.join(LOCAL_MANIFEST), false, "коллекция, секрет".to_string(), true),
+            (self.root.join(MANIFEST), true, tr!("коллекция", "collection"), false),
+            (self.root.join(LOCAL_MANIFEST), false, tr!("коллекция, секрет", "collection, secret"), true),
         ];
         if let Some(env) = env {
             let dir = self.root.join(ENV_DIR);
             let file = dir.join(format!("{env}.toml"));
             if !file.is_file() {
                 let known = self.environments();
-                let hint = if known.is_empty() { "в папке env нет окружений".into() } else { format!("есть: {}", known.join(", ")) };
-                return Err(Error::Invalid(format!("нет окружения «{env}» ({hint})")));
+                let hint = if known.is_empty() {
+                    tr!("в папке env нет окружений", "the env folder has no environments")
+                } else {
+                    tr!("есть: {}", "there are: {}", known.join(", "))
+                };
+                return Err(Error::Invalid(tr!("нет окружения «{env}» ({hint})", "no environment \"{env}\" ({hint})")));
             }
-            layers.push((file, true, format!("окружение {env}"), false));
-            layers.push((dir.join(format!("{env}.local.toml")), false, format!("{env}, секрет"), true));
+            layers.push((file, true, tr!("окружение {env}", "environment {env}"), false));
+            layers.push((dir.join(format!("{env}.local.toml")), false, tr!("{env}, секрет", "{env}, secret"), true));
         }
         let mut out: Vec<VarSource> = Vec::new();
         for (path, required, source, secret) in layers {
@@ -137,7 +141,7 @@ impl Collection {
             let Some(table) = doc.get("vars") else { continue };
             let table = table
                 .as_table_like()
-                .ok_or_else(|| Error::Parse { path: path.clone(), message: "vars должен быть таблицей".into() })?;
+                .ok_or_else(|| Error::Parse { path: path.clone(), message: tr!("vars должен быть таблицей", "vars must be a table") })?;
             for (key, item) in table.iter() {
                 let value = item.as_value().and_then(|v| match v {
                     toml_edit::Value::String(s) => Some(s.value().clone()),
@@ -146,7 +150,7 @@ impl Collection {
                     toml_edit::Value::Boolean(b) => Some(b.value().to_string()),
                     _ => None,
                 });
-                let value = value.ok_or_else(|| Error::Parse { path: path.clone(), message: format!("vars.{key}: нужна строка или число") })?;
+                let value = value.ok_or_else(|| Error::Parse { path: path.clone(), message: tr!("vars.{key}: нужна строка или число", "vars.{key}: expected a string or a number") })?;
                 out.retain(|v| v.name != key);
                 out.push(VarSource { name: key.to_string(), value, source: source.clone(), secret });
             }
@@ -167,19 +171,19 @@ impl Collection {
                 .iter()
                 .map(|v| v.as_inline_table().map(|t| t as &dyn toml_edit::TableLike))
                 .collect::<Option<_>>()
-                .ok_or_else(|| bad("certificates: нужны таблицы [[certificates]]".into()))?,
-            _ => return Err(bad("certificates: нужны таблицы [[certificates]]".into())),
+                .ok_or_else(|| bad(tr!("certificates: нужны таблицы [[certificates]]", "certificates: expected [[certificates]] tables")))?,
+            _ => return Err(bad(tr!("certificates: нужны таблицы [[certificates]]", "certificates: expected [[certificates]] tables"))),
         };
         tables
             .into_iter()
             .map(|t| {
                 let field = |key: &str| match t.get(key) {
                     None => Ok(String::new()),
-                    Some(v) => v.as_str().map(str::to_string).ok_or_else(|| bad(format!("certificates.{key}: нужна строка"))),
+                    Some(v) => v.as_str().map(str::to_string).ok_or_else(|| bad(tr!("certificates.{key}: нужна строка", "certificates.{key}: expected a string"))),
                 };
                 let spec = CertSpec { host: field("host")?, cert: field("cert")?, key: field("key")?, passphrase: field("passphrase")? };
                 if spec.host.trim().is_empty() {
-                    return Err(bad("certificates: у сертификата нет host".into()));
+                    return Err(bad(tr!("certificates: у сертификата нет host", "certificates: a certificate has no host")));
                 }
                 Ok(spec)
             })
@@ -311,6 +315,11 @@ mod tests {
         let token = sources.iter().find(|v| v.name == "token").unwrap();
         assert_eq!((token.source.as_str(), token.secret), ("stage, секрет", true));
         assert_eq!(sources.iter().find(|v| v.name == "host").unwrap().source, "окружение stage");
+        crate::lang::in_language(true, || {
+            assert_eq!(c.vars(Some("prod"), &Vars::new()).unwrap_err().to_string(), "no environment \"prod\" (there are: stage)");
+            let sources = c.var_sources(Some("stage")).unwrap();
+            assert_eq!(sources.iter().find(|v| v.name == "token").unwrap().source, "stage, secret");
+        });
 
         let nested = root.join("orders");
         assert_eq!(Collection::find_root(&nested).unwrap(), root.canonicalize().unwrap());

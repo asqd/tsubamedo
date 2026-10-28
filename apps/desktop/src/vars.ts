@@ -2,6 +2,7 @@
 // and which names a request uses but nobody defined.
 import { createContext, useContext } from "react";
 import { api, Request } from "./api";
+import { t } from "./i18n";
 
 export interface VarInfo {
   name: string;
@@ -12,28 +13,34 @@ export interface VarInfo {
   secret: boolean;
 }
 
-export const BUILTINS: VarInfo[] = [
-  { name: "$uuid", value: "случайный UUID", source: "встроенная", secret: false },
-  { name: "$timestamp", value: "секунды с 1970 года", source: "встроенная", secret: false },
-  { name: "$timestampMs", value: "миллисекунды с 1970 года", source: "встроенная", secret: false },
-  { name: "$isoTimestamp", value: "время в ISO 8601, UTC", source: "встроенная", secret: false },
-  { name: "$randomInt", value: "случайное число 0–999", source: "встроенная", secret: false },
-  { name: "$env.", value: "переменная окружения процесса: {{$env.TOKEN}}", source: "встроенная", secret: false },
+/** A built-in variable, described in the window's language. */
+const builtin = (name: string, value: string): VarInfo => ({ name, value, source: t("встроенная", "built-in"), secret: false });
+
+/** Built when asked, not at import, so the descriptions follow the language. */
+const fixed = (): VarInfo[] => [
+  builtin("$uuid", t("случайный UUID", "random UUID")),
+  builtin("$timestamp", t("секунды с 1970 года", "seconds since 1970")),
+  builtin("$timestampMs", t("миллисекунды с 1970 года", "milliseconds since 1970")),
+  builtin("$isoTimestamp", t("время в ISO 8601, UTC", "time in ISO 8601, UTC")),
+  builtin("$randomInt", t("случайное число 0–999", "random number 0–999")),
+  builtin("$env.", t("переменная окружения процесса: {{$env.TOKEN}}", "process environment variable: {{$env.TOKEN}}")),
 ];
 
 /** Postman's made-up values (`$randomEmail`…), named by the core once the window starts. */
-let fakes: VarInfo[] = [];
+let fakes: string[] = [];
 export async function loadFakes() {
   try {
-    const names = await api.fakeNames();
-    fakes = names.map((n) => ({ name: `$${n}`, value: "случайное значение, как в Postman", source: "встроенная", secret: false }));
+    fakes = await api.fakeNames();
   } catch {
     // Only suggestions.
   }
 }
 
 /** Every built-in, for suggestions. */
-export const builtins = () => [...BUILTINS, ...fakes];
+export const builtins = (): VarInfo[] => [
+  ...fixed(),
+  ...fakes.map((n) => builtin(`$${n}`, t("случайное значение, как в Postman", "random value, as in Postman"))),
+];
 
 export const VarsContext = createContext<VarInfo[]>([]);
 export const useVars = () => useContext(VarsContext);
@@ -45,7 +52,7 @@ export function lookup(name: string, vars: VarInfo[]): VarInfo | null {
   const found = vars.find((v) => v.name === name);
   if (found) return found;
   if (name.startsWith("$env.") && name.length > 5) {
-    return { name, value: "берётся из окружения процесса при отправке", source: "встроенная", secret: false };
+    return builtin(name, t("берётся из окружения процесса при отправке", "taken from the process environment when sent"));
   }
   return builtins().find((b) => b.name === name && !b.name.endsWith(".")) ?? null;
 }

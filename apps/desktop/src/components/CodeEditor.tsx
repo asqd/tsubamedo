@@ -33,7 +33,8 @@ import {
   ViewPlugin,
   ViewUpdate,
 } from "@codemirror/view";
-import { tags as t } from "@lezer/highlight";
+import { tags } from "@lezer/highlight";
+import { t } from "../i18n";
 import { builtins, lookup, shown, useVars, VAR_PATTERN, VarInfo } from "../vars";
 
 export type EditorMode = "line" | "json" | "text" | "js";
@@ -82,7 +83,11 @@ const varTooltip = hoverTooltip((view, pos) => {
         name.textContent = m[1];
         const value = dom.appendChild(document.createElement("div"));
         value.className = v ? "var-value" : "var-missing";
-        value.textContent = v ? shown(v) || (v.source.startsWith("из ответа") ? "ещё не получено" : "(пусто)") : "не задана в этом окружении";
+        // A captured value's source comes from the core, in the window's language.
+        const captured = v != null && (v.source.startsWith("из ответа") || v.source.startsWith("from the response"));
+        value.textContent = v
+          ? shown(v) || (captured ? t("ещё не получено", "not received yet") : t("(пусто)", "(empty)"))
+          : t("не задана в этом окружении", "not set in this environment");
         if (v) {
           const source = dom.appendChild(document.createElement("div"));
           source.className = "var-source";
@@ -116,49 +121,50 @@ function varCompletion(ctx: CompletionContext): CompletionResult | null {
 }
 
 /** What request scripts can call (see core/tsubamedo-core/src/scripts/prelude.js). */
-const pairsApi: [string, string][] = [
-  ["get", "get(имя) — значение или undefined"],
-  ["set", "set(имя, значение)"],
-  ["has", "has(имя)"],
-  ["remove", "remove(имя)"],
-  ["all", "all() — объект имя → значение"],
+// Built when asked, not at import, so the descriptions follow the language.
+const pairsApi = (): [string, string][] => [
+  ["get", t("get(имя) — значение или undefined", "get(name) — the value or undefined")],
+  ["set", t("set(имя, значение)", "set(name, value)")],
+  ["has", t("has(имя)", "has(name)")],
+  ["remove", t("remove(имя)", "remove(name)")],
+  ["all", t("all() — объект имя → значение", "all() — an object name → value")],
 ];
-const SCRIPT_API: Record<string, [string, string][]> = {
+const scriptApi = (): Record<string, [string, string][]> => ({
   "": [
-    ["vars", "переменные: get, set, has, render"],
-    ["request", "запрос: method, url, headers, query, body"],
-    ["response", "ответ (в скрипте после): status, headers, time, size, text(), json()"],
-    ["test", 'test("имя", () => expect(…).toBe(…))'],
-    ["expect", "expect(значение).toBe(…), .not.toBe(…)…"],
-    ["console", "console.log(…) — в журнал под ответом"],
+    ["vars", t("переменные: get, set, has, render", "variables: get, set, has, render")],
+    ["request", t("запрос: method, url, headers, query, body", "request: method, url, headers, query, body")],
+    ["response", t("ответ (в скрипте после): status, headers, time, size, text(), json()", "response (in the after script): status, headers, time, size, text(), json()")],
+    ["test", t('test("имя", () => expect(…).toBe(…))', 'test("name", () => expect(…).toBe(…))')],
+    ["expect", t("expect(значение).toBe(…), .not.toBe(…)…", "expect(value).toBe(…), .not.toBe(…)…")],
+    ["console", t("console.log(…) — в журнал под ответом", "console.log(…) — to the log under the response")],
     ["crypto", "sha1, sha256, sha512, hmac, randomUUID"],
-    ["btoa", "btoa(текст) — в base64"],
-    ["atob", "atob(base64) — обратно в текст"],
+    ["btoa", t("btoa(текст) — в base64", "btoa(text) — to base64")],
+    ["atob", t("atob(base64) — обратно в текст", "atob(base64) — back to text")],
   ],
   "vars.": [
-    ["get", "get(имя) — значение переменной"],
-    ["set", "set(имя, значение) — для этого и других запросов"],
-    ["has", "has(имя)"],
-    ["render", "render(текст) — подставить {{переменные}}"],
+    ["get", t("get(имя) — значение переменной", "get(name) — the variable's value")],
+    ["set", t("set(имя, значение) — для этого и других запросов", "set(name, value) — for this and other requests")],
+    ["has", t("has(имя)", "has(name)")],
+    ["render", t("render(текст) — подставить {{переменные}}", "render(text) — fill in {{variables}}")],
   ],
   "request.": [
-    ["method", "метод"],
-    ["url", "адрес, как в файле — с {{переменными}}"],
-    ["headers", "заголовки: get, set, has, remove, all"],
-    ["query", "параметры адреса: get, set, has, remove, all"],
-    ["body", "тело JSON или текст; можно присвоить объект"],
+    ["method", t("метод", "method")],
+    ["url", t("адрес, как в файле — с {{переменными}}", "URL as in the file — with {{variables}}")],
+    ["headers", t("заголовки: get, set, has, remove, all", "headers: get, set, has, remove, all")],
+    ["query", t("параметры адреса: get, set, has, remove, all", "URL params: get, set, has, remove, all")],
+    ["body", t("тело JSON или текст; можно присвоить объект", "body as JSON or text; an object can be assigned")],
   ],
-  "request.headers.": pairsApi,
-  "request.query.": pairsApi,
-  "response.headers.": pairsApi.filter(([n]) => n !== "set" && n !== "remove"),
+  "request.headers.": pairsApi(),
+  "request.query.": pairsApi(),
+  "response.headers.": pairsApi().filter(([n]) => n !== "set" && n !== "remove"),
   "response.": [
-    ["status", "код ответа"],
-    ["statusText", "текст статуса"],
-    ["time", "мс от отправки до последнего байта"],
-    ["size", "байт тела"],
-    ["headers", "заголовки: get, has, all"],
-    ["text", "text() — тело текстом"],
-    ["json", "json() — тело как объект"],
+    ["status", t("код ответа", "status code")],
+    ["statusText", t("текст статуса", "status text")],
+    ["time", t("мс от отправки до последнего байта", "ms from sending to the last byte")],
+    ["size", t("байт тела", "body bytes")],
+    ["headers", t("заголовки: get, has, all", "headers: get, has, all")],
+    ["text", t("text() — тело текстом", "text() — the body as text")],
+    ["json", t("json() — тело как объект", "json() — the body as an object")],
   ],
   "console.": [
     ["log", "log(…)"],
@@ -166,13 +172,13 @@ const SCRIPT_API: Record<string, [string, string][]> = {
     ["error", "error(…)"],
   ],
   "crypto.": [
-    ["sha256", 'sha256(текст, "hex" | "base64")'],
-    ["sha512", "sha512(текст, кодировка)"],
-    ["sha1", "sha1(текст, кодировка)"],
-    ["hmac", 'hmac("sha256", ключ, текст, "hex" | "base64")'],
+    ["sha256", t('sha256(текст, "hex" | "base64")', 'sha256(text, "hex" | "base64")')],
+    ["sha512", t("sha512(текст, кодировка)", "sha512(text, encoding)")],
+    ["sha1", t("sha1(текст, кодировка)", "sha1(text, encoding)")],
+    ["hmac", t('hmac("sha256", ключ, текст, "hex" | "base64")', 'hmac("sha256", key, text, "hex" | "base64")')],
     ["randomUUID", "randomUUID()"],
   ],
-};
+});
 const MATCHERS = [
   "toBe", "toEqual", "toBeTruthy", "toBeFalsy", "toBeDefined", "toBeUndefined", "toBeNull", "toContain", "toMatch",
   "toHaveLength", "toHaveProperty", "toBeGreaterThan", "toBeGreaterThanOrEqual", "toBeLessThan", "toBeLessThanOrEqual", "not",
@@ -187,7 +193,7 @@ function scriptCompletion(ctx: CompletionContext): CompletionResult | null {
   const word = ctx.matchBefore(/(?:[\w$]+\.)*[\w$]*$/);
   if (!word) return null;
   const dot = word.text.lastIndexOf(".");
-  const options = SCRIPT_API[word.text.slice(0, dot + 1)];
+  const options = scriptApi()[word.text.slice(0, dot + 1)];
   if (!options || (dot < 0 && word.text.length === 0 && !ctx.explicit)) return null;
   return {
     from: word.from + dot + 1,
@@ -197,14 +203,14 @@ function scriptCompletion(ctx: CompletionContext): CompletionResult | null {
 }
 
 const highlight = HighlightStyle.define([
-  { tag: [t.keyword, t.controlKeyword, t.definitionKeyword, t.operatorKeyword, t.moduleKeyword], color: "var(--m-patch)" },
-  { tag: t.comment, color: "var(--faint)", fontStyle: "italic" },
-  { tag: t.regexp, color: "var(--j-lit)" },
-  { tag: t.propertyName, color: "var(--j-key)" },
-  { tag: t.string, color: "var(--j-str)" },
-  { tag: t.number, color: "var(--j-num)" },
-  { tag: [t.bool, t.null], color: "var(--j-lit)" },
-  { tag: t.invalid, color: "var(--bad)" },
+  { tag: [tags.keyword, tags.controlKeyword, tags.definitionKeyword, tags.operatorKeyword, tags.moduleKeyword], color: "var(--m-patch)" },
+  { tag: tags.comment, color: "var(--faint)", fontStyle: "italic" },
+  { tag: tags.regexp, color: "var(--j-lit)" },
+  { tag: tags.propertyName, color: "var(--j-key)" },
+  { tag: tags.string, color: "var(--j-str)" },
+  { tag: tags.number, color: "var(--j-num)" },
+  { tag: [tags.bool, tags.null], color: "var(--j-lit)" },
+  { tag: tags.invalid, color: "var(--bad)" },
 ]);
 
 const theme = EditorView.theme({

@@ -1,5 +1,6 @@
 // An open request in the window.
 import { Request, ResponseMeta } from "./api";
+import { t } from "./i18n";
 
 export interface Tab {
   key: string;
@@ -18,5 +19,5 @@ export interface Tab {
 export function tabTitle(tab: Tab): string {
   if (tab.request.name) return tab.request.name;
   if (tab.id) return tab.id.split("/").pop()!;
-  return tab.request.url.replace(/^https?:\/\//, "").split("?")[0] || "Черновик";
+  return tab.request.url.replace(/^https?:\/\//, "").split("?")[0] || t("Черновик", "Draft");
 }

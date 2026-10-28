@@ -252,3 +252,34 @@ fn cookies_of_the_jar_and_of_the_response() {
     assert_eq!(results, [("из ответа", true), ("атрибуты", true), ("два", true), ("jar", false)], "{:?}", out.tests);
     assert!(out.tests[3].error.as_deref().unwrap().contains("pm.cookies.jar() в TsubameDo нет"));
 }
+
+#[test]
+fn speaks_english_when_asked() {
+    let r = response(201, r#"{"status":"new"}"#);
+    let sent = prepare(&Request { url: "http://x.test".into(), ..Request::default() }, &Vars::new(), Path::new(".")).unwrap();
+    let script = r#"
+        test("paid", () => expect(response.json().status).toBe("paid"));
+        test("not", () => expect(1).not.toBe(1));
+        test("chai", () => pm.expect(3).to.be.above(5));
+        test("status", () => pm.response.to.have.status(200));
+        test("jar", () => pm.cookies.jar());
+        test("helper", () => expect(typeof globalThis.__t).toBe("undefined"));
+        response.json(); x();
+    "#;
+    let out = crate::lang::in_language(true, || after(script, &sent, &r, &Vars::new(), &[]));
+    let errors: Vec<Option<&str>> = out.tests.iter().map(|t| t.error.as_deref()).collect();
+    assert_eq!(
+        errors,
+        [
+            Some(r#"expected "paid", got "new""#),
+            Some("expected not 1, got 1"),
+            Some("expected more than 5, got 3"),
+            Some("expected status 200, got status 201"),
+            Some("pm.cookies.jar() is not available in TsubameDo: scripts have no network or files"),
+            None,
+        ]
+    );
+    assert!(out.error.as_deref().unwrap().ends_with("(line 8)"), "{:?}", out.error);
+    let (_, out) = crate::lang::in_language(true, || before("request.body = 1;", &Request::default(), &Vars::new(), &[]));
+    assert_eq!(out.error.as_deref(), Some("only a JSON or text body can be changed (line 1)"));
+}

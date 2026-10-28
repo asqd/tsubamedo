@@ -210,7 +210,7 @@ async fn exchange(request: &Prepared, options: &SendOptions) -> Result<Response>
             if redirects.len() as u32 >= options.max_redirects {
                 return Err(Error::TooManyRedirects(options.max_redirects));
             }
-            let next = url.join(location).map_err(|e| Error::Http(format!("неверный Location «{location}»: {e}")))?;
+            let next = url.join(location).map_err(|e| Error::Http(tr!("неверный Location «{location}»: {e}", "invalid Location \"{location}\": {e}")))?;
             redirects.push(Redirect { status, url: url.to_string() });
             // What browsers do: 303 always, and 301/302 after POST, repeat as GET without a body.
             if (status == 303 && method != "HEAD") || (matches!(status, 301 | 302) && method == "POST") {
@@ -258,11 +258,11 @@ enum Sender {
 }
 
 async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes, options: &SendOptions) -> Result<Hop> {
-    let host = url.host().ok_or_else(|| Error::BadUrl { url: url.to_string(), reason: "нет имени сервера".into() })?;
+    let host = url.host().ok_or_else(|| Error::BadUrl { url: url.to_string(), reason: tr!("нет имени сервера", "no host name") })?;
     let host_name = url.host_str().unwrap_or_default().to_string();
     let port = url.port_or_known_default().unwrap_or(80);
     let https = url.scheme() == "https";
-    let proxy = options.proxy.for_url(url).map_err(|reason| Error::Proxy { proxy: "из настроек".into(), reason })?;
+    let proxy = options.proxy.for_url(url).map_err(|reason| Error::Proxy { proxy: tr!("из настроек", "from the settings"), reason })?;
     let proxy_error = |p: &proxy::Proxy, reason: String| Error::Proxy { proxy: p.label(), reason };
     let mut timings = Timings::default();
 
@@ -281,7 +281,7 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
         Host::Domain(domain) => tokio::net::lookup_host((domain.as_str(), dial_port))
             .await
             .map_err(|e| match &proxy {
-                Some(p) => proxy_error(p, format!("адрес не найден: {e}")),
+                Some(p) => proxy_error(p, tr!("адрес не найден: {e}", "address not found: {e}")),
                 None => Error::Dns { host: domain.to_string(), reason: e.to_string() },
             })?
             .collect(),
@@ -290,7 +290,7 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
 
     let t = Instant::now();
     let (mut tcp, remote_addr) = connect(&addrs, options.connect_timeout).await.map_err(|reason| match &proxy {
-        Some(p) => proxy_error(p, format!("не подключиться: {reason}")),
+        Some(p) => proxy_error(p, tr!("не подключиться: {reason}", "cannot connect: {reason}")),
         None => Error::Connect { target: format!("{host_name}:{port}"), reason },
     })?;
     // Plain HTTP through an HTTP proxy: the whole address goes in the request line.
@@ -319,7 +319,7 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
         let cert = client_cert::find(&options.client_certs, &host_name, port);
         let identity = match cert.map(|c| c.identity.clone()) {
             Some(Ok(identity)) => Some(identity),
-            Some(Err(reason)) => return Err(Error::Tls { host: host_name.clone(), reason: format!("клиентский сертификат: {reason}") }),
+            Some(Err(reason)) => return Err(Error::Tls { host: host_name.clone(), reason: tr!("клиентский сертификат: {reason}", "client certificate: {reason}") }),
             None => None,
         };
         let config = tls::config(options.verify_tls, identity.as_deref()).map_err(|reason| Error::Tls { host: host_name.clone(), reason })?;
@@ -330,7 +330,10 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
                 let mut reason = chain(&e);
                 // TLS 1.3 says so; TLS 1.2 servers often just break off.
                 if identity.is_none() && (reason.contains("CertificateRequired") || reason.contains("HandshakeFailure")) {
-                    reason.push_str(" — возможно, сервер ждёт клиентский сертификат (Настройки → Клиентские сертификаты, в CLI — --cert)");
+                    reason.push_str(tr_static!(
+                        " — возможно, сервер ждёт клиентский сертификат (Настройки → Клиентские сертификаты, в CLI — --cert)",
+                        " — the server may want a client certificate (Settings → Client certificates, --cert in the CLI)"
+                    ));
                 }
                 Error::Tls { host: host_name.clone(), reason }
             })?;
@@ -351,7 +354,7 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
 
     let h2 = matches!(sender, Sender::H2(_));
     let target = if h2 || absolute { &url[..Position::AfterQuery] } else { &url[Position::BeforePath..Position::AfterQuery] };
-    let http_method = http::Method::from_bytes(method.as_bytes()).map_err(|_| Error::Invalid(format!("неверный метод «{method}»")))?;
+    let http_method = http::Method::from_bytes(method.as_bytes()).map_err(|_| Error::Invalid(tr!("неверный метод «{method}»", "invalid method \"{method}\"")))?;
     let mut builder = hyper::Request::builder().method(http_method).uri(target);
     let has = |name: &str| headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(name));
     if !h2 && !has("host") {
@@ -367,9 +370,9 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
             continue;
         }
         let name = http::HeaderName::from_bytes(name.trim().as_bytes())
-            .map_err(|_| Error::Invalid(format!("неверное имя заголовка «{name}»")))?;
+            .map_err(|_| Error::Invalid(tr!("неверное имя заголовка «{name}»", "invalid header name \"{name}\"")))?;
         let value = http::HeaderValue::from_bytes(value.as_bytes())
-            .map_err(|_| Error::Invalid(format!("неверное значение заголовка {name}")))?;
+            .map_err(|_| Error::Invalid(tr!("неверное значение заголовка {name}", "invalid value of header {name}")))?;
         builder = builder.header(name, value);
     }
     if absolute
@@ -398,7 +401,7 @@ async fn hop(method: &str, url: &Url, headers: &[(String, String)], body: Bytes,
 }
 
 async fn connect(addrs: &[SocketAddr], limit: Duration) -> Result<(TcpStream, SocketAddr), String> {
-    let mut last = String::from("сервер не найден");
+    let mut last = tr!("сервер не найден", "server not found");
     for addr in addrs {
         match tokio::time::timeout(limit, TcpStream::connect(addr)).await {
             Ok(Ok(stream)) => {
@@ -406,7 +409,7 @@ async fn connect(addrs: &[SocketAddr], limit: Duration) -> Result<(TcpStream, So
                 return Ok((stream, *addr));
             }
             Ok(Err(e)) => last = e.to_string(),
-            Err(_) => last = format!("нет ответа за {} с", limit.as_secs()),
+            Err(_) => last = tr!("нет ответа за {} с", "no answer in {} s", limit.as_secs()),
         }
     }
     Err(last)
@@ -444,7 +447,7 @@ async fn read(hop: Hop, url: Url, redirects: Vec<Redirect>, start: Instant, opti
         .to_ascii_lowercase();
     let decode_as = if options.decompress { encoding.as_str() } else { "" };
     let mut decoder = Decoder::new(decode_as, Sink::new(options.spill_threshold, options.spill_dir.clone()));
-    let body_error = |reason: String| Error::Body { encoding: if decode_as.is_empty() { "без сжатия".into() } else { decode_as.to_string() }, reason };
+    let body_error = |reason: String| Error::Body { encoding: if decode_as.is_empty() { tr!("без сжатия", "uncompressed") } else { decode_as.to_string() }, reason };
     let mut wire_size = 0u64;
     while let Some(frame) = incoming.frame().await {
         let frame = frame.map_err(|e| Error::Http(chain(&e)))?;

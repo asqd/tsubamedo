@@ -118,7 +118,7 @@ impl Query {
     pub fn parse(text: &str) -> Result<Self, String> {
         let (query, rest) = Self::parse_prefix(text.trim())?;
         if !rest.trim().is_empty() {
-            return Err(format!("лишнее после запроса: «{}»", rest.trim()));
+            return Err(tr!("лишнее после запроса: «{}»", "unexpected text after the query: \"{}\"", rest.trim()));
         }
         Ok(query)
     }
@@ -129,7 +129,7 @@ impl Query {
         let (source, rest) = if text.starts_with('$') {
             let end = path_end(text);
             let path = &text[..end];
-            let parsed = JsonPath::parse(path).map_err(|e| format!("JSONPath «{path}»: {e}"))?;
+            let parsed = JsonPath::parse(path).map_err(|e| tr!("JSONPath «{path}»: {e}", "JSONPath \"{path}\": {e}"))?;
             (Source::Path(parsed, path.to_string(), many(path)), &text[end..])
         } else {
             let (word, rest) = next_word(text);
@@ -142,19 +142,22 @@ impl Query {
                     let rest = rest.trim_start();
                     let (name, rest) = match rest.strip_prefix('"') {
                         Some(quoted) => {
-                            let close = quoted.find('"').ok_or("не закрыта кавычка в имени заголовка")?;
+                            let close = quoted.find('"').ok_or(tr_static!("не закрыта кавычка в имени заголовка", "unclosed quote in the header name"))?;
                             (&quoted[..close], &quoted[close + 1..])
                         }
                         None => next_word(rest),
                     };
                     if name.is_empty() {
-                        return Err("после header нужно имя заголовка".into());
+                        return Err(tr!("после header нужно имя заголовка", "header needs a header name after it"));
                     }
                     (Source::Header(name.to_string()), rest)
                 }
-                "" => return Err("пустая строка".into()),
+                "" => return Err(tr!("пустая строка", "empty line")),
                 other => {
-                    return Err(format!("непонятно, что проверять: «{other}» (status, time, size, header Имя, body или $.путь)"));
+                    return Err(tr!(
+                        "непонятно, что проверять: «{other}» (status, time, size, header Имя, body или $.путь)",
+                        "unclear what to check: \"{other}\" (status, time, size, header Name, body or $.path)"
+                    ));
                 }
             }
         };
@@ -195,7 +198,7 @@ impl Query {
             Some(Value::Array(a)) => a.len(),
             Some(Value::Object(o)) => o.len(),
             Some(Value::String(s)) => s.chars().count(),
-            Some(other) => return Err(format!("count бывает у массива, объекта или строки, а здесь {}", short(other))),
+            Some(other) => return Err(tr!("count бывает у массива, объекта или строки, а здесь {}", "count works on an array, object or string, not {}", short(other))),
         })))
     }
 
@@ -204,8 +207,8 @@ impl Query {
             Source::Status => "status".into(),
             Source::Time => "time".into(),
             Source::Size => "size".into(),
-            Source::Header(name) => format!("заголовка {name}"),
-            Source::Body => "тела".into(),
+            Source::Header(name) => tr!("заголовка {name}", "header {name}"),
+            Source::Body => tr!("тела", "the body"),
             Source::Path(_, path, _) => path.clone(),
         };
         if self.count { format!("{base} count") } else { base }
@@ -305,32 +308,32 @@ impl Rule {
         })
         .ok_or_else(|| {
             if rest.is_empty() {
-                "нет условия: ==, !=, <, >, contains, matches, exists, empty, schema".to_string()
+                tr!("нет условия: ==, !=, <, >, contains, matches, exists, empty, schema", "no condition: ==, !=, <, >, contains, matches, exists, empty, schema")
             } else {
-                format!("непонятное условие «{rest}»")
+                tr!("непонятное условие «{rest}»", "unknown condition \"{rest}\"")
             }
         })?;
         if not && !matches!(op, Op::Contains | Op::Matches | Op::Exists | Op::Empty | Op::Schema) {
-            return Err("not ставится перед contains, matches, exists, empty или schema".into());
+            return Err(tr!("not ставится перед contains, matches, exists, empty или schema", "not goes before contains, matches, exists, empty or schema"));
         }
         let value = value.trim();
         let needs_value = !matches!(op, Op::Exists | Op::Empty);
         if needs_value && value.is_empty() {
-            return Err("после условия нужно значение".into());
+            return Err(tr!("после условия нужно значение", "the condition needs a value after it"));
         }
         if !needs_value && !value.is_empty() {
-            return Err(format!("лишнее после условия: «{value}»"));
+            return Err(tr!("лишнее после условия: «{value}»", "unexpected text after the condition: \"{value}\""));
         }
         let expected = match op {
             // A pattern is text as written: quotes, if any, are only around it.
             Op::Matches => {
                 let pattern = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(value);
-                regex::Regex::new(pattern).map_err(|e| format!("регулярное выражение: {e}"))?;
+                regex::Regex::new(pattern).map_err(|e| tr!("регулярное выражение: {e}", "regular expression: {e}"))?;
                 Value::String(pattern.to_string())
             }
             // A schema in the line is JSON; anything else is a file.
             Op::Schema if value.starts_with('{') || value == "true" || value == "false" => {
-                serde_json::from_str(value).map_err(|e| format!("схема в строке — не JSON: {e}"))?
+                serde_json::from_str(value).map_err(|e| tr!("схема в строке — не JSON: {e}", "the inline schema is not JSON: {e}"))?
             }
             Op::Schema => {
                 let path = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(value);
@@ -340,7 +343,10 @@ impl Rule {
             _ => serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string())),
         };
         if matches!(op, Op::Lt | Op::Le | Op::Gt | Op::Ge) && number(&expected).is_none() {
-            return Err(format!("сравнивать на больше-меньше можно только с числом, а не «{value}»"));
+            return Err(tr!(
+                "сравнивать на больше-меньше можно только с числом, а не «{value}»",
+                "greater/less than compares only with a number, not \"{value}\""
+            ));
         }
         Ok(Rule { query, op, not, expected })
     }
@@ -367,13 +373,13 @@ impl Rule {
             });
         }
         if found.is_empty() {
-            return Err(format!("в ответе нет {text}"));
+            return Err(tr!("в ответе нет {text}", "{text} is not in the response"));
         }
         let wrong: Vec<String> = found
             .iter()
             .filter_map(|(at, value)| match self.check(Some(value)) {
                 Ok(true) => None,
-                Ok(false) => Some(format!("{}: пришло {}", crate::schema::path(at), short(value))),
+                Ok(false) => Some(tr!("{}: пришло {}", "{}: got {}", crate::schema::path(at), short(value))),
                 Err(e) => Some(format!("{}: {e}", crate::schema::path(at))),
             })
             .collect();
@@ -382,7 +388,7 @@ impl Rule {
         }
         let mut why = wrong.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
         if wrong.len() > 3 {
-            why += &format!(" и ещё {}", wrong.len() - 3);
+            why += &tr!(" и ещё {}", " and {} more", wrong.len() - 3);
         }
         Ok((false, shown, Some(why)))
     }
@@ -391,12 +397,12 @@ impl Rule {
         if self.op == Op::Exists {
             return Ok(actual.is_some() != self.not);
         }
-        let Some(actual) = actual else { return Err(format!("в ответе нет {}", self.query.describe())) };
+        let Some(actual) = actual else { return Err(tr!("в ответе нет {}", "{} is not in the response", self.query.describe())) };
         let ok = match self.op {
             Op::Eq => same(actual, &self.expected),
             Op::Ne => !same(actual, &self.expected),
             Op::Lt | Op::Le | Op::Gt | Op::Ge => {
-                let a = number(actual).ok_or_else(|| format!("{} не число", short(actual)))?;
+                let a = number(actual).ok_or_else(|| tr!("{} не число", "{} is not a number", short(actual)))?;
                 let b = number(&self.expected).unwrap_or_default();
                 match self.op {
                     Op::Lt => a < b,
@@ -483,7 +489,7 @@ impl<'a> Answer<'a> {
             .get_or_init(|| {
                 let body = &self.response.body;
                 if body.len() > JSON_LIMIT {
-                    return Err(format!("тело больше {} МБ, его не проверить целиком", JSON_LIMIT >> 20));
+                    return Err(tr!("тело больше {} МБ, его не проверить целиком", "the body is over {} MB, too big to check whole", JSON_LIMIT >> 20));
                 }
                 let mut bytes = Vec::new();
                 body.reader().and_then(|mut r| r.read_to_end(&mut bytes)).map_err(|e| e.to_string())?;
@@ -497,7 +503,7 @@ impl<'a> Answer<'a> {
         self.json
             .get_or_init(|| {
                 let text = self.text()?;
-                serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| format!("ответ не JSON: {e}"))
+                serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| tr!("ответ не JSON: {e}", "the response is not JSON: {e}"))
             })
             .as_ref()
             .map_err(Clone::clone)
@@ -528,7 +534,7 @@ pub fn run_checks(checks: &[Check], answer: &Answer, vars: &Vars, dir: Option<&P
                 });
                 return match verdict {
                     Err(e) => failed(e),
-                    Ok(Ok(())) if rule.not => failed("подходит под схему, а не должно".into()),
+                    Ok(Ok(())) if rule.not => failed(tr!("подходит под схему, а не должно", "matches the schema but should not")),
                     Ok(Ok(())) => CheckResult { check: c.text.clone(), ok: true, actual: None, error: None },
                     Ok(Err(_)) if rule.not => CheckResult { check: c.text.clone(), ok: true, actual: None, error: None },
                     Ok(Err(why)) => failed(why),
@@ -565,14 +571,14 @@ fn schema_values<'a>(query: &Query, answer: &'a Answer) -> Result<Vec<Located<'a
         Source::Path(path, text, _) if !query.count => {
             let found = located(path, answer)?;
             if found.is_empty() {
-                return Err(format!("в ответе нет {text}"));
+                return Err(tr!("в ответе нет {text}", "{text} is not in the response"));
             }
             Ok(found.into_iter().map(|(at, v)| (at, Cow::Borrowed(v))).collect())
         }
         Source::Body if !query.count => Ok(vec![(Vec::new(), Cow::Borrowed(answer.json()?))]),
         _ => match query.eval(answer)? {
             Some(v) => Ok(vec![(Vec::new(), Cow::Owned(v))]),
-            None => Err(format!("в ответе нет {}", query.describe())),
+            None => Err(tr!("в ответе нет {}", "{} is not in the response", query.describe())),
         },
     }
 }
@@ -599,7 +605,7 @@ pub fn capture(captures: &[Pair], answer: &Answer) -> Vec<Captured> {
             let name = c.name.trim().to_string();
             let value = Query::parse(&c.value).and_then(|q| match q.eval(answer)? {
                 Some(v) => Ok(text(&v)),
-                None => Err(format!("в ответе нет {}", q.describe())),
+                None => Err(tr!("в ответе нет {}", "{} is not in the response", q.describe())),
             });
             match value {
                 Ok(value) => Captured { name, value: Some(value), error: None },
@@ -695,6 +701,12 @@ mod tests {
         assert_eq!(got[5].2.as_deref(), Some("не заданы переменные: nope"));
         assert!(got[6].2.is_some());
         assert!(got.iter().all(|g| !g.0));
+
+        let got = crate::lang::in_language(true, || results(&r, &["$.missing == 1", "$.user.name < 3", "header X-Nope == 1", "zzz == 1"], &Vars::new()));
+        assert_eq!(got[0].2.as_deref(), Some("$.missing is not in the response"));
+        assert_eq!(got[1].2.as_deref(), Some("\"Котик\" is not a number"));
+        assert_eq!(got[2].2.as_deref(), Some("header X-Nope is not in the response"));
+        assert!(got[3].2.as_deref().unwrap().starts_with("unclear what to check: \"zzz\""));
 
         let html = response(200, "<html>");
         let got = results(&html, &["$.a exists", "body contains html"], &Vars::new());
@@ -800,6 +812,8 @@ mod tests {
             r#"схема неверна: $.type: ожидалось одно из "array", "boolean", "integer", "null", "number", "object", "string""#
         );
         assert_eq!(validate(r#"$.id schema {"minimum": "x"}"#).unwrap_err(), "схема неверна: $.minimum: ожидалось число, а здесь строка");
+        let english = crate::lang::in_language(true, || validate(r#"$.id schema {"minimum": "x"}"#).unwrap_err());
+        assert_eq!(english, "schema is invalid: $.minimum: expected number, got string");
         assert!(validate(r#"$.id schema {"type": "#).unwrap_err().contains("не JSON"));
     }
 

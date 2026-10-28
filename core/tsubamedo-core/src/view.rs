@@ -294,13 +294,13 @@ impl TextView {
                 for close in closes {
                     match stack.pop() {
                         Some(want) if want == close => {}
-                        Some(_) => return Ok(Err("скобки не совпадают".into())),
-                        None => return Ok(Err("лишняя закрывающая скобка".into())),
+                        Some(_) => return Ok(Err(tr!("скобки не совпадают", "brackets do not match"))),
+                        None => return Ok(Err(tr!("лишняя закрывающая скобка", "extra closing bracket"))),
                     }
                 }
                 stack.extend(opens);
                 if stack.len() > MAX_DEPTH {
-                    return Ok(Err(format!("вложенность глубже {MAX_DEPTH} уровней")));
+                    return Ok(Err(tr!("вложенность глубже {MAX_DEPTH} уровней", "nested deeper than {MAX_DEPTH} levels")));
                 }
                 starts.push(stack.clone());
             }
@@ -322,11 +322,11 @@ impl TextView {
                 Err(reason) => return Ok(Err(reason)),
             };
             if starts.get(k + 1).is_some_and(|next| *next != part.end) {
-                return Ok(Err("скобки не совпадают".into()));
+                return Ok(Err(tr!("скобки не совпадают", "brackets do not match")));
             }
             let first = lines as u32;
             for close in part.closed {
-                let Some(line) = open.pop() else { return Ok(Err("лишняя закрывающая скобка".into())) };
+                let Some(line) = open.pop() else { return Ok(Err(tr!("лишняя закрывающая скобка", "extra closing bracket"))) };
                 across.push((line, first + close));
             }
             open.extend(part.open.iter().map(|&line| first + line));
@@ -715,12 +715,12 @@ impl Formatter {
         while i < end {
             let b = src[i];
             if stack.is_empty() && seen_value && !ws(b) {
-                return Err("после JSON есть ещё текст".into());
+                return Err(tr!("после JSON есть ещё текст", "there is more text after the JSON"));
             }
             match b {
                 b' ' | b'\t' | b'\r' | b'\n' => i += 1,
                 b'"' => {
-                    let Some(j) = string_end(src, i + 1) else { return Err("строка не закрыта".into()) };
+                    let Some(j) = string_end(src, i + 1) else { return Err(tr!("строка не закрыта", "unclosed string")) };
                     self.token(&src[i..j]);
                     i = j;
                     seen_value = true;
@@ -737,7 +737,7 @@ impl Formatter {
                         seen_value = true;
                     } else {
                         if stack.len() == MAX_DEPTH {
-                            return Err(format!("вложенность глубже {MAX_DEPTH} уровней"));
+                            return Err(tr!("вложенность глубже {MAX_DEPTH} уровней", "nested deeper than {MAX_DEPTH} levels"));
                         }
                         self.token(&[b]);
                         stack.push((close, self.index.line()));
@@ -746,9 +746,9 @@ impl Formatter {
                     }
                 }
                 b'}' | b']' => {
-                    let Some((want, open)) = stack.pop() else { return Err("лишняя закрывающая скобка".into()) };
+                    let Some((want, open)) = stack.pop() else { return Err(tr!("лишняя закрывающая скобка", "extra closing bracket")) };
                     if want != b {
-                        return Err("скобки не совпадают".into());
+                        return Err(tr!("скобки не совпадают", "brackets do not match"));
                     }
                     self.newline(stack.len());
                     let line = self.index.line();
@@ -777,12 +777,12 @@ impl Formatter {
                         i += 1;
                     }
                     if i == start {
-                        return Err(format!("непонятный символ «{}»", String::from_utf8_lossy(&src[i..(i + 1).min(end)])));
+                        return Err(tr!("непонятный символ «{}»", "unexpected character \"{}\"", String::from_utf8_lossy(&src[i..(i + 1).min(end)])));
                     }
                     let word = &src[start..i];
                     let number = word[0] == b'-' || word[0].is_ascii_digit();
                     if !number && !matches!(word, b"true" | b"false" | b"null") {
-                        return Err(format!("непонятное слово «{}»", String::from_utf8_lossy(&word[..word.len().min(20)])));
+                        return Err(tr!("непонятное слово «{}»", "unexpected word \"{}\"", String::from_utf8_lossy(&word[..word.len().min(20)])));
                     }
                     self.token(word);
                     seen_value = true;
@@ -790,10 +790,10 @@ impl Formatter {
             }
         }
         if last && !stack.is_empty() {
-            return Err("JSON оборван: не все скобки закрыты".into());
+            return Err(tr!("JSON оборван: не все скобки закрыты", "the JSON is cut off: not all brackets are closed"));
         }
         if !seen_value {
-            return Err("пустой ответ".into());
+            return Err(tr!("пустой ответ", "empty response"));
         }
         Ok((stack, inherited))
     }

@@ -25,7 +25,7 @@ impl Report {
 
     /// A request file that could not be read.
     pub fn broken(&mut self, error: &str) {
-        self.cases.push(Case { id: "файл".into(), seconds: 0.0, error: Some(error.to_string()), failures: Vec::new() });
+        self.cases.push(Case { id: tsubamedo_core::tr!("файл", "file"), seconds: 0.0, error: Some(error.to_string()), failures: Vec::new() });
     }
 
     /// `failures` are those of the exchange plus whatever the run itself adds (`--fail`).
@@ -108,6 +108,8 @@ mod tests {
         r.cases.push(Case { id: "orders/list".into(), seconds: 0.05, error: None, failures: vec!["status == 200 — пришло 404".into(), "$.a exists — в ответе нет $.a".into()] });
         r.cases.push(Case { id: "ping".into(), seconds: 0.0, error: Some("не удалось подключиться к x:1: <отказ>".into()), failures: Vec::new() });
         assert_eq!(r.counts(), (1, 2));
+        tsubamedo_core::lang::in_language(true, || r.broken("x.toml: oops"));
+        assert_eq!(r.cases.pop().map(|c| c.id).as_deref(), Some("file"));
         let xml = r.xml(Duration::from_millis(1500));
         assert_eq!(
             xml,

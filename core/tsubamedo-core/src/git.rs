@@ -88,8 +88,11 @@ fn git() -> Result<PathBuf, String> {
     });
     match found {
         Some(path) => Ok(FOUND.get_or_init(|| path).clone()),
-        None if cfg!(target_os = "macos") => Err("git не найден: установите его — xcode-select --install или brew install git".into()),
-        None => Err("git не найден: установите его".into()),
+        None if cfg!(target_os = "macos") => Err(tr!(
+            "git не найден: установите его — xcode-select --install или brew install git",
+            "git not found: install it — xcode-select --install or brew install git"
+        )),
+        None => Err(tr!("git не найден: установите его", "git not found: install it")),
     }
 }
 
@@ -113,7 +116,7 @@ fn run(git: &Path, dir: &Path, args: &[&str], stdin: Option<&str>, limit: Durati
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("git не запустился: {e}"))?;
+        .map_err(|e| tr!("git не запустился: {e}", "git did not start: {e}"))?;
     if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
         use std::io::Write;
         pipe.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
@@ -137,7 +140,7 @@ fn run(git: &Path, dir: &Path, args: &[&str], stdin: Option<&str>, limit: Durati
         if Instant::now() > deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(format!("git {}: нет ответа за {} с", args[0], limit.as_secs()));
+            return Err(tr!("git {}: нет ответа за {} с", "git {}: no answer in {} s", args[0], limit.as_secs()));
         }
         std::thread::sleep(Duration::from_millis(15));
     };
@@ -149,19 +152,28 @@ fn run(git: &Path, dir: &Path, args: &[&str], stdin: Option<&str>, limit: Durati
 fn explain(err: &str, out: &str) -> String {
     let has = |s: &str| err.contains(s);
     if has("Please tell me who you are") || has("unable to auto-detect email address") {
-        return "git не знает автора: git config --global user.name \"Имя\" и git config --global user.email адрес".into();
+        return tr!(
+            "git не знает автора: git config --global user.name \"Имя\" и git config --global user.email адрес",
+            "git does not know the author: git config --global user.name \"Name\" and git config --global user.email address"
+        );
     }
     if has("terminal prompts disabled") || has("could not read Username") || has("Authentication failed") {
-        return "сервер просит войти: настройте ключ SSH или хранилище паролей git — в терминале достаточно войти один раз".into();
+        return tr!(
+            "сервер просит войти: настройте ключ SSH или хранилище паролей git — в терминале достаточно войти один раз",
+            "the server asks to sign in: set up an SSH key or a git credential helper — signing in once in a terminal is enough"
+        );
     }
     if has("Permission denied (publickey") || has("Host key verification failed") {
-        return "ключ SSH не подошёл: проверьте, что он добавлен на сервер и в ssh-agent (ssh-add)".into();
+        return tr!(
+            "ключ SSH не подошёл: проверьте, что он добавлен на сервер и в ssh-agent (ssh-add)",
+            "the SSH key was not accepted: check that it is added on the server and to ssh-agent (ssh-add)"
+        );
     }
     if let Some(host) = err.split("Could not resolve host: ").nth(1) {
-        return format!("нет связи с {}", host.lines().next().unwrap_or_default().trim());
+        return tr!("нет связи с {}", "cannot reach {}", host.lines().next().unwrap_or_default().trim());
     }
     if has("[rejected]") || has("non-fast-forward") || has("fetch first") {
-        return "на сервере есть коммиты, которых здесь нет: сначала «Получить»".into();
+        return tr!("на сервере есть коммиты, которых здесь нет: сначала «Получить»", "the server has commits that are not here: Pull first");
     }
     let text = if err.trim().is_empty() { out } else { err };
     let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("hint:")).collect();
@@ -188,7 +200,7 @@ impl Repo {
     /// A new repository in the collection's folder, secrets left out of it.
     pub fn init(root: &Path) -> Result<Repo, String> {
         run(&git()?, root, &["init", "--quiet"], None, QUICK)?;
-        let repo = Repo::open(root)?.ok_or("git init не создал репозиторий")?;
+        let repo = Repo::open(root)?.ok_or(tr_static!("git init не создал репозиторий", "git init did not create a repository"))?;
         repo.ignore_secrets()?;
         Ok(repo)
     }
@@ -269,17 +281,17 @@ impl Repo {
     /// paths) and nothing else, whatever else is staged. Returns the short hash.
     pub fn commit(&self, paths: &[String], message: &str) -> Result<String, String> {
         if message.trim().is_empty() {
-            return Err("нужно описание коммита".into());
+            return Err(tr!("нужно описание коммита", "the commit needs a message"));
         }
         if paths.is_empty() {
-            return Err("не выбрано ни одного файла".into());
+            return Err(tr!("не выбрано ни одного файла", "no files selected"));
         }
         if let Some(secret) = paths.iter().find(|p| p.ends_with(SECRET)) {
-            return Err(format!("{secret}: в *.local.toml секреты, они не коммитятся"));
+            return Err(tr!("{secret}: в *.local.toml секреты, они не коммитятся", "{secret}: *.local.toml files hold secrets, they are not committed"));
         }
         let _one = exclusive();
         if let Some(busy) = self.busy() {
-            return Err(format!("в репозитории не закончено {busy} — закончите его в git"));
+            return Err(tr!("в репозитории не закончено {busy} — закончите его в git", "a {busy} is in progress in the repository — finish it in git"));
         }
         let full: Vec<String> = paths.iter().map(|p| self.full(p)).collect();
         // What is on disk is added; what is gone is removed, even when the index has already
@@ -315,12 +327,12 @@ impl Repo {
     pub fn pull(&self) -> Result<String, String> {
         let _one = exclusive();
         if let Some(busy) = self.busy() {
-            return Err(format!("в репозитории не закончено {busy} — закончите его в git"));
+            return Err(tr!("в репозитории не закончено {busy} — закончите его в git", "a {busy} is in progress in the repository — finish it in git"));
         }
         let status = self.status()?;
-        let branch = status.branch.ok_or("HEAD не на ветке: переключитесь на ветку в git")?;
+        let branch = status.branch.ok_or(tr_static!("HEAD не на ветке: переключитесь на ветку в git", "HEAD is not on a branch: switch to a branch in git"))?;
         if status.upstream.is_none() {
-            return Err(format!("ветка {branch} ещё не связана с сервером — сначала «Отправить»"));
+            return Err(tr!("ветка {branch} ещё не связана с сервером — сначала «Отправить»", "branch {branch} is not tied to the server yet — Push first"));
         }
         let before = self.git(&["rev-parse", "HEAD"], QUICK)?.trim().to_string();
         if let Err(e) = self.git(&["pull", "--rebase", "--autostash", "--quiet"], NETWORK) {
@@ -328,8 +340,9 @@ impl Repo {
                 let files = self.git(&["diff", "--name-only", "--diff-filter=U"], QUICK).unwrap_or_default();
                 let _ = self.git(&["rebase", "--abort"], QUICK);
                 let files: Vec<&str> = files.lines().map(|f| f.strip_prefix(self.prefix.as_str()).unwrap_or(f)).collect();
-                return Err(format!(
+                return Err(tr!(
                     "на сервере те же места изменены иначе: {} — ничего не тронуто, разберите конфликт в git",
+                    "the server changed the same places differently: {} — nothing was touched, resolve the conflict in git",
                     files.join(", ")
                 ));
             }
@@ -337,8 +350,8 @@ impl Repo {
         }
         let came: u32 = self.git(&["rev-list", "--count", &format!("{before}..@{{upstream}}")], QUICK)?.trim().parse().unwrap_or(0);
         Ok(match came {
-            0 => "нового на сервере нет".into(),
-            n => format!("получено коммитов: {n}"),
+            0 => tr!("нового на сервере нет", "nothing new on the server"),
+            n => tr!("получено коммитов: {n}", "commits pulled: {n}"),
         })
     }
 
@@ -347,24 +360,28 @@ impl Repo {
     pub fn push(&self) -> Result<String, String> {
         let _one = exclusive();
         let status = self.status()?;
-        let branch = status.branch.ok_or("HEAD не на ветке: переключитесь на ветку в git")?;
+        let branch = status.branch.ok_or(tr_static!("HEAD не на ветке: переключитесь на ветку в git", "HEAD is not on a branch: switch to a branch in git"))?;
         if status.upstream.is_some() {
             if status.ahead == 0 {
-                return Ok("отправлять нечего".into());
+                return Ok(tr!("отправлять нечего", "nothing to push"));
             }
             self.git(&["push", "--quiet"], NETWORK)?;
-            return Ok(format!("отправлено коммитов: {}", status.ahead));
+            return Ok(tr!("отправлено коммитов: {}", "commits pushed: {}", status.ahead));
         }
         let remotes = self.git(&["remote"], QUICK)?;
         let remotes: Vec<&str> = remotes.lines().collect();
         let remote = match remotes.as_slice() {
-            [] => return Err("у репозитория нет сервера: git remote add origin <адрес>".into()),
+            [] => return Err(tr!("у репозитория нет сервера: git remote add origin <адрес>", "the repository has no server: git remote add origin <address>")),
             [one] => *one,
             many if many.contains(&"origin") => "origin",
-            many => return Err(format!("серверов несколько ({}), а origin среди них нет: отправьте ветку в git", many.join(", "))),
+            many => return Err(tr!(
+                    "серверов несколько ({}), а origin среди них нет: отправьте ветку в git",
+                    "there are several servers ({}) and none is origin: push the branch in git",
+                    many.join(", ")
+                )),
         };
         self.git(&["push", "--quiet", "--set-upstream", remote, &branch], NETWORK)?;
-        Ok(format!("ветка {branch} отправлена в {remote}"))
+        Ok(tr!("ветка {branch} отправлена в {remote}", "branch {branch} pushed to {remote}"))
     }
 
     /// `*.local.toml` into the collection's `.gitignore`.
@@ -391,9 +408,9 @@ impl Repo {
     fn busy(&self) -> Option<String> {
         let at = |name: &str| self.git_dir.join(name).exists();
         if at("rebase-merge") || at("rebase-apply") {
-            Some("перебазирование (rebase)".into())
+            Some(tr!("перебазирование (rebase)", "rebase"))
         } else if at("MERGE_HEAD") {
-            Some("слияние (merge)".into())
+            Some(tr!("слияние (merge)", "merge"))
         } else if at("CHERRY_PICK_HEAD") {
             Some("cherry-pick".into())
         } else {
@@ -431,6 +448,11 @@ mod tests {
         assert!(explain("git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n", "").starts_with("ключ SSH не подошёл"));
         assert_eq!(explain("fatal: unable to access 'https://x.test/r.git/': Could not resolve host: x.test\n", ""), "нет связи с x.test");
         assert_eq!(explain("hint: see the docs\nfatal: something odd\n", ""), "something odd");
+        crate::lang::in_language(true, || {
+            assert!(explain("*** Please tell me who you are.\n\nRun\n", "").starts_with("git does not know the author"));
+            assert_eq!(explain("fatal: unable to access 'https://x.test/r.git/': Could not resolve host: x.test\n", ""), "cannot reach x.test");
+            assert_eq!(explain(" ! [rejected] main -> main (fetch first)\n", ""), "the server has commits that are not here: Pull first");
+        });
     }
 
     #[test]

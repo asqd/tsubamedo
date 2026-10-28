@@ -4,6 +4,7 @@
 // with it (by key position, so a Russian layout works too).
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Language } from "../api";
+import { t } from "../i18n";
 
 /** «Python — requests»; a group of one name, and the shell, by the name alone. */
 export const languageLabel = (l: Language) => (l.group === l.name || l.group === "Shell" ? l.name : `${l.group} — ${l.name}`);
@@ -89,8 +90,8 @@ export function LanguagePicker({ languages, value, onChange }: { languages: Lang
         className="language"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label="Язык"
-        title="Язык и библиотека"
+        aria-label={t("Язык", "Language")}
+        title={t("Язык и библиотека", "Language and library")}
         disabled={languages.length === 0}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onKeyDown}

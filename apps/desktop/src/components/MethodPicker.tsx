@@ -3,6 +3,7 @@
 // arrows and Enter open and walk the list, a letter picks the next method starting with it (by
 // key position, so a Russian layout works too).
 import { useEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
@@ -63,7 +64,7 @@ export function MethodPicker({ value, onChange }: { value: string; onChange: (me
         className={`method m-${value.toLowerCase()}`}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title="Метод запроса"
+        title={t("Метод запроса", "Request method")}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onKeyDown}
       >

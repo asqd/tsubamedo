@@ -2,7 +2,8 @@
 // Edits are saved to the request's file as you type; the core rewrites only what changed.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, CollectionInfo, emptyRequest, GitState, ImportPreview, Reorganized, Request } from "./api";
-import { when } from "./format";
+import { noun, when } from "./format";
+import { lang, t } from "./i18n";
 import { CodeDialog } from "./components/CodeDialog";
 import { ComparePanel, CompareState } from "./components/ComparePanel";
 import { ContextMenu, MenuItem } from "./components/ContextMenu";
@@ -45,6 +46,11 @@ const store = {
 };
 
 const newKey = () => crypto.randomUUID().slice(0, 8);
+
+/** The core's word for a send the user stopped, in either language. */
+const isCancelled = (message: string) => message === "Отменено" || message === "Cancelled" || message === "Canceled";
+
+const noEnv = () => t("без окружения", "no environment");
 
 function scratchTab(key = newKey()): Tab {
   let request = emptyRequest();
@@ -115,7 +121,7 @@ export default function App() {
         },
       );
     } catch (e) {
-      setProblem(`Не удалось сохранить: ${(e as Error).message}`);
+      setProblem(t(`Не удалось сохранить: ${(e as Error).message}`, `Could not save: ${(e as Error).message}`));
       setSaveState("idle");
     }
   }, []);
@@ -299,7 +305,7 @@ export default function App() {
       patchTab(current.key, { response: meta, responseEnv: env, sendId: null });
     } catch (e) {
       const message = (e as Error).message;
-      patchTab(current.key, { sendId: null, error: message === "Отменено" ? null : message });
+      patchTab(current.key, { sendId: null, error: isCancelled(message) ? null : message });
     }
     setHistoryVersion((v) => v + 1);
     // Values captured from the response (or those sent first) are variables now.
@@ -315,21 +321,21 @@ export default function App() {
       const leftEnv = current.responseEnv !== undefined ? current.responseEnv : env;
       const left = {
         side: { responseId: meta.responseId, status: meta.status, headers: meta.headers },
-        label: `${leftEnv ?? "без окружения"}, ${when(meta.receivedAt)}`,
+        label: `${leftEnv ?? noEnv()}, ${when(meta.receivedAt)}`,
       };
       const others: (string | null)[] = [...(leftEnv ? [null] : []), ...(collection?.environments ?? []).filter((e) => e !== leftEnv)];
       const withEnv = (target: string | null) => async () => {
         await flushSave();
         const sendId = crypto.randomUUID();
-        setCompare({ requestId: current.id, left, rightLabel: target ?? "без окружения", right: null, sendId, error: null });
+        setCompare({ requestId: current.id, left, rightLabel: target ?? noEnv(), right: null, sendId, error: null });
         const update = (patch: Partial<CompareState>) => setCompare((c) => (c?.sendId === sendId ? { ...c, ...patch } : c));
         try {
           const other = await api.send(sendId, current.id, current.request, target, false);
-          update({ right: { responseId: other.responseId, status: other.status, headers: other.headers }, rightLabel: `${target ?? "без окружения"}, ${when(other.receivedAt)}` });
+          update({ right: { responseId: other.responseId, status: other.status, headers: other.headers }, rightLabel: `${target ?? noEnv()}, ${when(other.receivedAt)}` });
         } catch (e) {
           const message = (e as Error).message;
-          if (message === "Отменено") setCompare(null);
-          else update({ error: `${target ?? "без окружения"}: ${message}` });
+          if (isCancelled(message)) setCompare(null);
+          else update({ error: `${target ?? noEnv()}: ${message}` });
         }
         setHistoryVersion((v) => v + 1);
       };
@@ -337,16 +343,16 @@ export default function App() {
       const earlier = current.id ? (await api.history(current.id).catch(() => [])).filter((h) => h.hasBody && Math.abs(h.at - meta.receivedAt) > 2000).slice(0, 12) : [];
       const items: MenuItem[] = [
         {
-          label: "С окружением",
+          label: t("С окружением", "With environment"),
           disabled: others.length === 0,
-          submenu: others.map((e) => ({ label: e ?? "без окружения", onClick: withEnv(e) })),
+          submenu: others.map((e) => ({ label: e ?? noEnv(), onClick: withEnv(e) })),
         },
         {
-          label: "С прошлым ответом",
+          label: t("С прошлым ответом", "With an earlier response"),
           disabled: earlier.length === 0,
           submenu: earlier.map((h) => ({
-            label: `${when(h.at)} · ${h.env ?? "без окружения"} · ${h.status ?? "—"}`,
-            onClick: () => setCompare({ requestId: current.id, left, rightLabel: `${h.env ?? "без окружения"}, ${when(h.at)}`, right: { historyId: h.id }, sendId: null, error: null }),
+            label: `${when(h.at)} · ${h.env ?? noEnv()} · ${h.status ?? "—"}`,
+            onClick: () => setCompare({ requestId: current.id, left, rightLabel: `${h.env ?? noEnv()}, ${when(h.at)}`, right: { historyId: h.id }, sendId: null, error: null }),
           })),
         },
       ];
@@ -392,7 +398,7 @@ export default function App() {
       .then((imported) => {
         const next = { ...imported, name: before.name };
         change(next);
-        flash({ text: "Запрос взят из команды curl", undo: () => change(before) });
+        flash({ text: t("Запрос взят из команды curl", "Request taken from the curl command"), undo: () => change(before) });
       })
       .catch((e) => setProblem(`curl: ${(e as Error).message}`));
     return true;
@@ -432,13 +438,14 @@ export default function App() {
         if (!env && info.environments.length > 0) setEnv(info.environments[0]);
       }
       const n = written.requests;
+      const requests = noun(n, ["запрос", "запроса", "запросов"], ["request", "requests"]);
       const what =
         target.kind === "new"
-          ? `Создана коллекция «${info.name}»: запросов ${n}`
+          ? t(`Создана коллекция «${info.name}»: запросов ${n}`, `Created the collection "${info.name}": ${n} ${requests}`)
           : n > 0
-            ? `Импортировано в папку «${written.folder}»: запросов ${n}`
-            : `Добавлены окружения: ${written.environments.join(", ") || "—"}`;
-      const kept = written.kept.length ? ` · уже были, оставлены: ${written.kept.join(", ")}` : "";
+            ? t(`Импортировано в папку «${written.folder}»: запросов ${n}`, `Imported into the folder "${written.folder}": ${n} ${requests}`)
+            : t(`Добавлены окружения: ${written.environments.join(", ") || "—"}`, `Environments added: ${written.environments.join(", ") || "—"}`);
+      const kept = written.kept.length ? t(` · уже были, оставлены: ${written.kept.join(", ")}`, ` · already there, kept: ${written.kept.join(", ")}`) : "";
       flash({ text: what + kept });
     } catch (e) {
       setImporting((cur) => cur && { ...cur, busy: false });
@@ -487,7 +494,7 @@ export default function App() {
     run: (folder) => startRun(folder),
     newRequest: async (folder) =>
       guarded(async () => {
-        const { id, collection: info } = await api.createRequest(folder, "Новый запрос");
+        const { id, collection: info } = await api.createRequest(folder, t("Новый запрос", "New request"));
         setCollection(info);
         await openNew(id);
         setRenameTarget({ kind: "request", path: id, n: Date.now() });
@@ -495,7 +502,7 @@ export default function App() {
       }),
     newFolder: async (parent) =>
       guarded(async () => {
-        const result = await api.createFolder(parent, "Новая папка");
+        const result = await api.createFolder(parent, t("Новая папка", "New folder"));
         setCollection(result.collection);
         setRenameTarget({ kind: "folder", path: result.id, n: Date.now() });
         return result.id;
@@ -524,7 +531,7 @@ export default function App() {
         if (pendingSave.current?.id === path) pendingSave.current = null;
         const result = kind === "request" ? await api.deleteRequest(path) : await api.deleteFolder(path);
         await applyReorganized(result, kind === "request" ? exact(path, null) : under(path, null));
-        flash({ text: kind === "request" ? "Запрос перемещён в Корзину" : "Папка перемещена в Корзину" });
+        flash({ text: kind === "request" ? t("Запрос перемещён в Корзину", "Request moved to the Trash") : t("Папка перемещена в Корзину", "Folder moved to the Trash") });
       });
     },
   };
@@ -540,14 +547,18 @@ export default function App() {
     await flushSave();
     try {
       const entry = await api.openHistory(entryId);
-      const when = new Date(entry.at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+      const when = new Date(entry.at).toLocaleString(lang() === "en" ? "en-US" : "ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
       const title = entry.request.name ?? entry.requestId?.split("/").pop() ?? entry.request.url;
       const fresh = scratchTab();
       fresh.request = { ...entry.request, name: `${title} · ${when}` };
       fresh.response = entry.response;
       fresh.error = entry.response
         ? null
-        : entry.error ?? `Ответ ${entry.status ?? ""} пришёл ${when}, но его тело больше 1 МБ и не сохранялось. Отправьте запрос ещё раз.`;
+        : entry.error ??
+          t(
+            `Ответ ${entry.status ?? ""} пришёл ${when}, но его тело больше 1 МБ и не сохранялось. Отправьте запрос ещё раз.`,
+            `The response ${entry.status ?? ""} came ${when}, but its body was over 1 MB and was not kept. Send the request again.`,
+          );
       store.set(`scratch:${fresh.key}`, JSON.stringify(fresh.request));
       setTabs((all) => [...all, fresh]);
       setActive(fresh.key);
@@ -616,7 +627,7 @@ export default function App() {
       const done = await gitAction(() => api.gitCommit(paths, message));
       if (!done) return false;
       setGit(done.status);
-      flash({ text: `Закоммичено: ${done.hash}` });
+      flash({ text: t(`Закоммичено: ${done.hash}`, `Committed: ${done.hash}`) });
       return true;
     },
     pull: async () => {
@@ -722,8 +733,8 @@ export default function App() {
           </span>
           <span className="sp" data-tauri-drag-region />
           {collection && collection.environments.length > 0 && (
-            <label className="env" title="Окружение: переменные из папки env">
-              <span className="faint small">Окружение</span>
+            <label className="env" title={t("Окружение: переменные из папки env", "Environment: variables from the env folder")}>
+              <span className="faint small">{t("Окружение", "Environment")}</span>
               <select
                 value={env ?? ""}
                 onChange={(e) => {
@@ -732,20 +743,20 @@ export default function App() {
                   store.set(`env:${collection.root}`, v);
                 }}
               >
-                <option value="">без окружения</option>
+                <option value="">{noEnv()}</option>
                 {collection.environments.map((name) => (
                   <option key={name}>{name}</option>
                 ))}
               </select>
             </label>
           )}
-          <button className="ghost small" onClick={() => setCookiesOpen(true)} title="Cookie, которые поставили серверы, — у каждого окружения свои">
-            Cookie
+          <button className="ghost small" onClick={() => setCookiesOpen(true)} title={t("Cookie, которые поставили серверы, — у каждого окружения свои", "Cookies the servers set — each environment has its own")}>
+            {t("Cookie", "Cookies")}
           </button>
-          <button className="ghost small" onClick={() => setSettingsOpen(true)} title="Прокси и клиентские сертификаты">
-            Настройки
+          <button className="ghost small" onClick={() => setSettingsOpen(true)} title={t("Прокси и клиентские сертификаты", "Proxy and client certificates")}>
+            {t("Настройки", "Settings")}
           </button>
-          <span className="faint small save-state">{saveState === "saving" ? "сохраняю…" : saveState === "saved" ? "сохранено" : ""}</span>
+          <span className="faint small save-state">{saveState === "saving" ? t("сохраняю…", "saving…") : saveState === "saved" ? t("сохранено", "saved") : ""}</span>
         </header>
         {problem && (
           <div className="problem small">
@@ -842,7 +853,7 @@ export default function App() {
                   setNotice(null);
                 }}
               >
-                Вернуть как было
+                {t("Вернуть как было", "Undo")}
               </button>
             )}
           </div>

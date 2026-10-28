@@ -2,6 +2,9 @@
 // so scripts imported from those tools keep working. Only what such scripts use most.
 "use strict";
 (() => {
+  // The prelude's language helper, taken off the global object before any user script runs.
+  const t = globalThis.__t;
+  delete globalThis.__t;
   const quoted = (v) => {
     if (typeof v === "string") return JSON.stringify(v);
     try {
@@ -11,7 +14,7 @@
     }
   };
   const fail = (what) => {
-    throw new Error(`${what} в TsubameDo нет: у скриптов нет сети и файлов`);
+    throw new Error(t(`${what} в TsubameDo нет: у скриптов нет сети и файлов`, `${what} is not available in TsubameDo: scripts have no network or files`));
   };
 
   // ---- variables: every Postman scope is our one set ----
@@ -46,7 +49,8 @@
     check(pass, wanted) {
       if (Boolean(pass) === this.negate) {
         const prefix = this.message ? `${this.message}: ` : "";
-        throw new Error(`${prefix}${this.negate ? "не " : ""}ожидалось ${wanted}, пришло ${quoted(this.value)}`);
+        const not = this.negate;
+        throw new Error(prefix + t(`${not ? "не " : ""}ожидалось ${wanted}, пришло ${quoted(this.value)}`, `expected ${not ? "not " : ""}${wanted}, got ${quoted(this.value)}`));
       }
       return this;
     }
@@ -59,7 +63,7 @@
       return this;
     }
     get ok() {
-      return this.check(this.value, "истинное значение");
+      return this.check(this.value, t("истинное значение", "a truthy value"));
     }
     get true() {
       return this.check(this.value === true, "true");
@@ -77,7 +81,7 @@
       return this.check(Number.isNaN(this.value), "NaN");
     }
     get exist() {
-      return this.check(this.value != null, "значение");
+      return this.check(this.value != null, t("значение", "a value"));
     }
     get exists() {
       return this.exist;
@@ -85,10 +89,10 @@
     get empty() {
       const v = this.value;
       const size = typeof v === "string" || Array.isArray(v) ? v.length : v && typeof v === "object" ? Object.keys(v).length : NaN;
-      return this.check(size === 0, "пустое значение");
+      return this.check(size === 0, t("пустое значение", "an empty value"));
     }
     a(type) {
-      return this.check(typeOf(this.value) === String(type).toLowerCase(), `тип ${type}`);
+      return this.check(typeOf(this.value) === String(type).toLowerCase(), t(`тип ${type}`, `type ${type}`));
     }
     an(type) {
       return this.a(type);
@@ -112,7 +116,7 @@
       else if (Array.isArray(a)) pass = a.some((x) => (this.isDeep ? deepEqual(x, v) : Object.is(x, v)));
       else if (a && typeof a === "object" && v && typeof v === "object") pass = Object.keys(v).every((k) => own(a, k) && deepEqual(a[k], v[k]));
       else pass = false;
-      return this.check(pass, `что-то с ${quoted(v)}`);
+      return this.check(pass, t(`что-то с ${quoted(v)}`, `something with ${quoted(v)}`));
     }
     includes(v) {
       return this.include(v);
@@ -124,7 +128,7 @@
       return this.include(v);
     }
     above(n) {
-      return this.check(this.value > n, `больше ${n}`);
+      return this.check(this.value > n, t(`больше ${n}`, `more than ${n}`));
     }
     gt(n) {
       return this.above(n);
@@ -133,7 +137,7 @@
       return this.above(n);
     }
     below(n) {
-      return this.check(this.value < n, `меньше ${n}`);
+      return this.check(this.value < n, t(`меньше ${n}`, `less than ${n}`));
     }
     lt(n) {
       return this.below(n);
@@ -142,22 +146,22 @@
       return this.below(n);
     }
     least(n) {
-      return this.check(this.value >= n, `не меньше ${n}`);
+      return this.check(this.value >= n, t(`не меньше ${n}`, `at least ${n}`));
     }
     gte(n) {
       return this.least(n);
     }
     most(n) {
-      return this.check(this.value <= n, `не больше ${n}`);
+      return this.check(this.value <= n, t(`не больше ${n}`, `at most ${n}`));
     }
     lte(n) {
       return this.most(n);
     }
     within(a, b) {
-      return this.check(this.value >= a && this.value <= b, `от ${a} до ${b}`);
+      return this.check(this.value >= a && this.value <= b, t(`от ${a} до ${b}`, `from ${a} to ${b}`));
     }
     lengthOf(n) {
-      return this.check(this.value != null && this.value.length === n, `длину ${n}`);
+      return this.check(this.value != null && this.value.length === n, t(`длину ${n}`, `length ${n}`));
     }
     length(n) {
       return this.lengthOf(n);
@@ -172,27 +176,27 @@
           .reduce((o, k) => (own(o, k) ? o[k] : undefined), v);
         found = got !== undefined;
       }
-      if (value.length === 0) this.check(found, `поле ${name}`);
-      else this.check(found && deepEqual(got, value[0]), `поле ${name} = ${quoted(value[0])}`);
+      if (value.length === 0) this.check(found, t(`поле ${name}`, `property ${name}`));
+      else this.check(found && deepEqual(got, value[0]), t(`поле ${name} = ${quoted(value[0])}`, `property ${name} = ${quoted(value[0])}`));
       // As in chai, what follows is about the field: `property("user").that.has.property("id")`.
       return this.negate ? this : new Assertion(got, this.message);
     }
     keys(...list) {
       const wanted = list.length === 1 && Array.isArray(list[0]) ? list[0] : list;
-      return this.check(this.value && wanted.every((k) => own(this.value, k)), `поля ${wanted.join(", ")}`);
+      return this.check(this.value && wanted.every((k) => own(this.value, k)), t(`поля ${wanted.join(", ")}`, `properties ${wanted.join(", ")}`));
     }
     members(list) {
       const a = this.value;
-      return this.check(Array.isArray(a) && list.every((x) => a.some((y) => deepEqual(x, y))), `элементы ${quoted(list)}`);
+      return this.check(Array.isArray(a) && list.every((x) => a.some((y) => deepEqual(x, y))), t(`элементы ${quoted(list)}`, `members ${quoted(list)}`));
     }
     match(re) {
-      return this.check(typeof this.value === "string" && re.test(this.value), `совпадение с ${re}`);
+      return this.check(typeof this.value === "string" && re.test(this.value), t(`совпадение с ${re}`, `a match for ${re}`));
     }
     string(s) {
-      return this.check(typeof this.value === "string" && this.value.includes(s), `строку с ${quoted(s)}`);
+      return this.check(typeof this.value === "string" && this.value.includes(s), t(`строку с ${quoted(s)}`, `a string with ${quoted(s)}`));
     }
     oneOf(list) {
-      return this.check(list.some((x) => deepEqual(x, this.value)), `одно из ${quoted(list)}`);
+      return this.check(list.some((x) => deepEqual(x, this.value)), t(`одно из ${quoted(list)}`, `one of ${quoted(list)}`));
     }
   }
   // Words that only make the sentence read: `to.be.an`, `that.has`…
@@ -205,7 +209,7 @@
   }
   const chai = (value, message) => new Assertion(value, message);
   chai.fail = (message) => {
-    throw new Error(message || "провал");
+    throw new Error(message || t("провал", "failed"));
   };
 
   // ---- request ----
@@ -261,11 +265,13 @@
   if (res) {
     const to = (negate) => {
       const check = (pass, wanted) => {
-        if (Boolean(pass) === negate) throw new Error(`${negate ? "не " : ""}ожидался ${wanted}, пришёл статус ${res.status}`);
+        if (Boolean(pass) === negate) {
+          throw new Error(t(`${negate ? "не " : ""}ожидался ${wanted}, пришёл статус ${res.status}`, `expected ${negate ? "not " : ""}${wanted}, got status ${res.status}`));
+        }
       };
-      const status = (s) => check(typeof s === "number" ? res.status === s : res.statusText === s, `статус ${quoted(s)}`);
+      const status = (s) => check(typeof s === "number" ? res.status === s : res.statusText === s, t(`статус ${quoted(s)}`, `status ${quoted(s)}`));
       const header = (name, value) =>
-        check(value === undefined ? res.headers.has(name) : res.headers.get(name) === String(value), `заголовок ${name}${value === undefined ? "" : ` = ${quoted(value)}`}`);
+        check(value === undefined ? res.headers.has(name) : res.headers.get(name) === String(value), t(`заголовок ${name}`, `header ${name}`) + (value === undefined ? "" : ` = ${quoted(value)}`));
       const isJson = () => {
         try {
           res.json();
@@ -276,28 +282,28 @@
       };
       const be = {
         get ok() {
-          return check(res.status === 200, "статус 200");
+          return check(res.status === 200, t("статус 200", "status 200"));
         },
         get success() {
-          return check(res.status >= 200 && res.status < 300, "успешный статус");
+          return check(res.status >= 200 && res.status < 300, t("успешный статус", "a success status"));
         },
         get error() {
-          return check(res.status >= 400, "статус ошибки");
+          return check(res.status >= 400, t("статус ошибки", "an error status"));
         },
         get clientError() {
-          return check(res.status >= 400 && res.status < 500, "статус 4xx");
+          return check(res.status >= 400 && res.status < 500, t("статус 4xx", "status 4xx"));
         },
         get serverError() {
-          return check(res.status >= 500, "статус 5xx");
+          return check(res.status >= 500, t("статус 5xx", "status 5xx"));
         },
         get notFound() {
-          return check(res.status === 404, "статус 404");
+          return check(res.status === 404, t("статус 404", "status 404"));
         },
         get json() {
-          return check(isJson(), "ответ JSON");
+          return check(isJson(), t("ответ JSON", "a JSON response"));
         },
       };
-      return { have: { status, header, jsonBody: () => check(isJson(), "ответ JSON") }, be, get not() { return to(!negate); } };
+      return { have: { status, header, jsonBody: () => check(isJson(), t("ответ JSON", "a JSON response")) }, be, get not() { return to(!negate); } };
     };
     pmResponse = Object.freeze({
       code: res.status,
@@ -351,7 +357,7 @@
     {
       set(_, name, value) {
         test(String(name), () => {
-          if (!value) throw new Error("условие ложно");
+          if (!value) throw new Error(t("условие ложно", "the condition is false"));
         });
         return true;
       },
@@ -401,7 +407,7 @@
   const modules = (name) => {
     if (name === "crypto-js") return CryptoJS;
     if (name === "chai") return { expect: chai };
-    throw new Error(`модуля ${name} в TsubameDo нет`);
+    throw new Error(t(`модуля ${name} в TsubameDo нет`, `there is no module ${name} in TsubameDo`));
   };
   globalThis.require = modules;
 })();

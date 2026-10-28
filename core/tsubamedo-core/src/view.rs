@@ -2,7 +2,8 @@
 //!
 //! The interface never gets the whole body: it asks for the lines it shows. A view is the
 //! body (raw) or its pretty-printed JSON (written to temporary files the same way big bodies
-//! are), plus a line index of 2 bytes per line and the fold ranges of JSON objects and arrays.
+//! are), plus a line index (where every 1024th line starts; the lines between are found by
+//! their line breaks) and the fold ranges of JSON objects and arrays.
 //! Lines longer than [`MAX_LINE`] bytes are cut into several, so minified JSON on one line
 //! still scrolls.
 //!
@@ -29,13 +30,111 @@ const MAX_DEPTH: usize = 1000;
 /// Bodies are cut into parts of at least this size for formatting on several cores.
 const MIN_PART: usize = 1 << 20;
 
-/// Line lengths (with their `\n`), and the offset of every 1024th line.
+/// The number of lines and where every 1024th starts. A line inside its block is found by
+/// counting from the block's start: a microsecond, while a length per line would hold 2 bytes
+/// of each of the 26 million lines of a 263 MB JSON.
 #[derive(Default)]
 struct LineIndex {
-    lens: Vec<u16>,
+    lines: usize,
     checkpoints: Vec<u64>,
+    /// Blocks with a line cut for being long: elsewhere every line ends with `\n`, and lines
+    /// are counted by counting those.
+    cut: Vec<bool>,
     current: usize,
     offset: u64,
+}
+
+/// Line breaks in `data`, counted many bytes at a time.
+fn breaks(data: &[u8]) -> usize {
+    data.iter().filter(|&&b| b == b'\n').count()
+}
+
+/// Where the `n`th line break after `at` ends; the end of `data` if there are fewer.
+fn after_breaks(data: &[u8], mut at: usize, mut n: usize) -> usize {
+    const CHUNK: usize = 512;
+    while n > 0 && at < data.len() {
+        let chunk = &data[at..data.len().min(at + CHUNK)];
+        let here = breaks(chunk);
+        if here < n {
+            n -= here;
+            at += chunk.len();
+            continue;
+        }
+        for pos in memchr::memchr_iter(b'\n', chunk) {
+            n -= 1;
+            if n == 0 {
+                return at + pos + 1;
+            }
+        }
+    }
+    data.len().min(at)
+}
+
+/// The length of the line starting at `at` (with its `\n`), cut as [`LineIndex`] cuts it: a
+/// line longer than [`MAX_LINE`] ends before the next character that starts after it.
+fn line_len(data: &[u8], at: usize) -> usize {
+    let rest = &data[at.min(data.len())..];
+    if let Some(pos) = memchr::memchr(b'\n', &rest[..rest.len().min(MAX_LINE)]) {
+        return pos + 1;
+    }
+    for (i, &b) in rest.iter().enumerate().skip(MAX_LINE) {
+        if b == b'\n' {
+            return i + 1;
+        }
+        if b & 0xC0 != 0x80 {
+            return i;
+        }
+    }
+    rest.len()
+}
+
+/// From the line `line` starting at `at`, the line holding byte `target` and where it starts.
+/// Runs over line breaks in bulk; only a line longer than [`MAX_LINE`] is cut step by step.
+fn find_line(data: &[u8], mut line: usize, mut at: usize, target: usize) -> (usize, usize) {
+    loop {
+        let base = at;
+        let mut long = false;
+        for q in memchr::memchr_iter(b'\n', &data[base..]) {
+            let end = base + q + 1;
+            if end - at > MAX_LINE {
+                long = true;
+                break;
+            }
+            if end > target {
+                return (line, at);
+            }
+            line += 1;
+            at = end;
+        }
+        let len = line_len(data, at);
+        if at + len > target || len == 0 || !long && at + len >= data.len() {
+            return (line, at);
+        }
+        line += 1;
+        at += len;
+    }
+}
+
+/// Where the line `count` lines after the one starting at `at` starts.
+fn skip_lines(data: &[u8], mut at: usize, mut count: usize) -> usize {
+    while count > 0 && at < data.len() {
+        let base = at;
+        for q in memchr::memchr_iter(b'\n', &data[base..]) {
+            let end = base + q + 1;
+            if end - at > MAX_LINE {
+                break;
+            }
+            at = end;
+            count -= 1;
+            if count == 0 {
+                return at;
+            }
+        }
+        // A long line, or the last one without a break.
+        at += line_len(data, at);
+        count -= 1;
+    }
+    at
 }
 
 impl LineIndex {
@@ -44,6 +143,7 @@ impl LineIndex {
         // A long line is cut before a character starts, never inside one.
         if self.current >= MAX_LINE && b & 0xC0 != 0x80 && b != b'\n' {
             self.end_line();
+            *self.cut.last_mut().expect("a block for the line just ended") = true;
         }
         self.current += 1;
         if b == b'\n' {
@@ -67,31 +167,32 @@ impl LineIndex {
     }
 
     fn end_line(&mut self) {
-        if self.lens.len().is_multiple_of(CHECKPOINT) {
+        if self.lines.is_multiple_of(CHECKPOINT) {
             self.checkpoints.push(self.offset);
+            self.cut.push(false);
         }
-        self.lens.push(self.current as u16);
+        self.lines += 1;
         self.offset += self.current as u64;
         self.current = 0;
     }
 
     fn finish(&mut self) {
-        if self.current > 0 || self.lens.is_empty() {
+        if self.current > 0 || self.lines == 0 {
             self.end_line();
         }
-        self.lens.shrink_to_fit();
         self.checkpoints.shrink_to_fit();
+        self.cut.shrink_to_fit();
     }
 
     /// The line being written now.
     fn line(&self) -> u32 {
-        self.lens.len() as u32
+        self.lines as u32
     }
 
-    fn start(&self, line: usize) -> u64 {
+    fn start(&self, data: &[u8], line: usize) -> usize {
         let block = line / CHECKPOINT;
-        let from = block * CHECKPOINT;
-        self.checkpoints[block] + self.lens[from..line].iter().map(|&l| l as u64).sum::<u64>()
+        let (at, n) = (self.checkpoints[block] as usize, line - block * CHECKPOINT);
+        if self.cut[block] { skip_lines(data, at, n) } else { after_breaks(data, at, n) }
     }
 }
 
@@ -138,7 +239,7 @@ impl Segment {
     }
 
     fn line_count(&self) -> usize {
-        self.index.lens.len()
+        self.index.lines
     }
 }
 
@@ -275,8 +376,9 @@ impl TextView {
         }
         let s = &self.segments[self.segments.partition_point(|s| s.first <= n) - 1];
         let local = n - s.first;
-        let start = s.index.start(local) as usize;
-        let mut line = &s.data.bytes()[start..start + s.index.lens[local] as usize];
+        let data = s.data.bytes();
+        let start = s.index.start(data, local);
+        let mut line = &data[start..start + line_len(data, start)];
         if let Some(rest) = line.strip_suffix(b"\n") {
             line = rest.strip_suffix(b"\r").unwrap_or(rest);
         }
@@ -312,17 +414,36 @@ impl TextView {
     pub fn search(&self, matcher: &Matcher) -> SearchResult {
         let mut result = SearchResult { total: 0, lines: Vec::new() };
         for s in &self.segments {
-            let mut line = 0usize;
-            let mut line_end = s.index.lens.first().map_or(0, |&l| l as u64);
-            for start in matcher.find_iter(s.data.bytes()) {
-                let start = start as u64;
-                while start >= line_end && line + 1 < s.line_count() {
-                    line += 1;
-                    line_end += s.index.lens[line] as u64;
+            let data = s.data.bytes();
+            let (mut line, mut line_start) = (0usize, 0usize);
+            let mut line_end = line_len(data, 0);
+            for start in matcher.find_iter(data) {
+                // Past the listed lines only the count goes on: no line to find.
+                if result.lines.len() >= MAX_MATCH_LINES {
+                    result.total += 1;
+                    if result.total >= MAX_MATCHES {
+                        return result;
+                    }
+                    continue;
+                }
+                if start >= line_end {
+                    // A match blocks ahead goes from the start of its block.
+                    let block = s.index.checkpoints.partition_point(|&c| c as usize <= start) - 1;
+                    if block * CHECKPOINT > line {
+                        (line, line_start) = (block * CHECKPOINT, s.index.checkpoints[block] as usize);
+                    }
+                    if s.index.cut[block] {
+                        (line, line_start) = find_line(data, line, line_start, start);
+                    } else {
+                        let gap = &data[line_start..start];
+                        line += breaks(gap);
+                        line_start = memchr::memrchr(b'\n', gap).map_or(line_start, |p| line_start + p + 1);
+                    }
+                    line_end = line_start + line_len(data, line_start);
                 }
                 result.total += 1;
                 let n = (s.first + line) as u32;
-                if result.lines.last() != Some(&n) && result.lines.len() < MAX_MATCH_LINES {
+                if result.lines.last() != Some(&n) {
                     result.lines.push(n);
                 }
                 if result.total >= MAX_MATCHES {
@@ -778,6 +899,64 @@ mod tests {
         assert_eq!(v.line_count(), 5000);
         assert_eq!(v.line(4321), b"line 4321");
         assert_eq!(v.line(5000), b"");
+    }
+
+    /// Lines as the byte-by-byte rule cuts them, to check the index against.
+    fn cut(data: &[u8]) -> Vec<&[u8]> {
+        let (mut out, mut start, mut current) = (Vec::new(), 0, 0);
+        for (i, &b) in data.iter().enumerate() {
+            if current >= MAX_LINE && b & 0xC0 != 0x80 && b != b'\n' {
+                out.push(&data[start..i]);
+                (start, current) = (i, 0);
+            }
+            current += 1;
+            if b == b'\n' {
+                out.push(&data[start..=i]);
+                (start, current) = (i + 1, 0);
+            }
+        }
+        if start < data.len() || out.is_empty() {
+            out.push(&data[start..]);
+        }
+        out
+    }
+
+    #[test]
+    fn walking_finds_the_lines_the_index_cut() {
+        fastrand::seed(7);
+        let pieces: [&[u8]; 6] = [b"a", "ж".as_bytes(), "🐈".as_bytes(), b"\n", b"\r\n", b"kot "];
+        for round in 0..24 {
+            let mut data = Vec::new();
+            let target = if round % 2 == 0 { 20_000 } else { 200_000 };
+            while data.len() < target {
+                // Long runs without a break, and a break right at the cut now and then; every
+                // third round without them, as most bodies are.
+                match if round % 3 == 0 { 9 } else { fastrand::u8(0..10) } {
+                    0 => data.extend(std::iter::repeat_n(b'x', MAX_LINE - 1 + fastrand::usize(0..3))),
+                    1 => data.extend("ж".repeat(fastrand::usize(1500..3000)).as_bytes()),
+                    _ => data.extend_from_slice(pieces[fastrand::usize(..pieces.len())]),
+                }
+            }
+            let v = TextView::raw(&body(std::str::from_utf8(&data).unwrap())).unwrap();
+            let want = cut(&data);
+            assert_eq!(v.line_count(), want.len(), "раунд {round}");
+            for (n, line) in want.iter().enumerate() {
+                let line = line.strip_suffix(b"\n").map(|l| l.strip_suffix(b"\r").unwrap_or(l)).unwrap_or(line);
+                assert_eq!(v.line(n), line, "раунд {round}, строка {n}");
+            }
+            // Search names the line each match starts on, even one a cut runs through.
+            let m = Matcher::new("kot", true).unwrap();
+            let ends: Vec<usize> = want.iter().scan(0, |at, l| Some(std::mem::replace(at, *at + l.len()) + l.len())).collect();
+            let mut lines: Vec<u32> = Vec::new();
+            for start in memchr::memmem::find_iter(&data, b"kot") {
+                let n = ends.partition_point(|&end| end <= start) as u32;
+                if lines.last() != Some(&n) {
+                    lines.push(n);
+                }
+            }
+            lines.truncate(MAX_MATCH_LINES);
+            assert_eq!(v.search(&m).lines, lines, "раунд {round}");
+        }
     }
 
     #[test]

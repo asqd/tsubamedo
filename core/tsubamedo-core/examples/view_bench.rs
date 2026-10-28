@@ -29,6 +29,15 @@ fn main() {
         println!("search {name} «{query}»: {} matches on {} lines in {:?}", found.total, found.lines.len(), t.elapsed());
     }
 
+    // What scrolling costs: screens of 100 lines anywhere in the text.
+    let t = Instant::now();
+    let mut bytes = 0;
+    for i in 0..1000u64 {
+        let first = (i.wrapping_mul(2_654_435_761) % pretty.line_count() as u64) as usize;
+        bytes += (first..first + 100).map(|n| pretty.line(n).len()).sum::<usize>();
+    }
+    println!("1000 screens of 100 lines in {:?} ({bytes} bytes)", t.elapsed());
+
     // To compare with `jq .`
     if let Some(out) = out {
         let mut file = std::io::BufWriter::new(std::fs::File::create(out).unwrap());

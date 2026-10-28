@@ -27,7 +27,9 @@ EOF
     for shot in hero checks compare code; do
         cat lib.js "$shot.js" > "$TMP/$shot.js"
         for theme in light dark; do
-            swift ../screenshot.swift http://localhost:1430/bridge.html "$out/$shot-$theme.png" 1360 820 "$TMP/setup.js" "$TMP/$shot.js" "$theme"
+            # Once more if it fails: the language set just before the reload does not always win the race.
+            swift ../screenshot.swift http://localhost:1430/bridge.html "$out/$shot-$theme.png" 1360 820 "$TMP/setup.js" "$TMP/$shot.js" "$theme" ||
+                swift ../screenshot.swift http://localhost:1430/bridge.html "$out/$shot-$theme.png" 1360 820 "$TMP/setup.js" "$TMP/$shot.js" "$theme"
         done
     done
 done

@@ -25,9 +25,9 @@ async function send() {
 }
 // The language of «Код…» by its name in the list: «requests».
 async function language(name) {
-  document.querySelector(".language-picker .language").click();
+  document.querySelector(".language-picker .picker-button").click();
   await sleep(200);
-  const item = [...document.querySelectorAll(".language-menu .menu-item")].find((b) => b.textContent.trim().startsWith(name));
+  const item = [...document.querySelectorAll(".picker-menu .menu-item")].find((b) => b.textContent.trim().startsWith(name));
   if (!item) throw new Error(`no language "${name}"`);
   item.click();
 }

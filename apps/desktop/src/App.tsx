@@ -7,6 +7,7 @@ import { lang, t } from "./i18n";
 import { CodeDialog } from "./components/CodeDialog";
 import { ComparePanel, CompareState } from "./components/ComparePanel";
 import { ContextMenu, MenuItem } from "./components/ContextMenu";
+import { Picker } from "./components/Picker";
 import { CookiesDialog } from "./components/CookiesDialog";
 import { ImportDialog, ImportTarget } from "./components/ImportDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -733,27 +734,26 @@ export default function App() {
           </span>
           <span className="sp" data-tauri-drag-region />
           {collection && collection.environments.length > 0 && (
-            <label className="env" title={t("Окружение: переменные из папки env", "Environment: variables from the env folder")}>
+            <div className="env">
               <span className="faint small">{t("Окружение", "Environment")}</span>
-              <select
+              <Picker
+                className="env-picker"
+                label={t("Окружение", "Environment")}
+                title={t("Окружение: переменные из папки env", "Environment: variables from the env folder")}
+                options={[{ value: "", label: noEnv(), faint: true }, ...collection.environments.map((name) => ({ value: name, label: name }))]}
                 value={env ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value || null;
+                onChange={(value) => {
+                  const v = value || null;
                   setEnv(v);
                   store.set(`env:${collection.root}`, v);
                 }}
-              >
-                <option value="">{noEnv()}</option>
-                {collection.environments.map((name) => (
-                  <option key={name}>{name}</option>
-                ))}
-              </select>
-            </label>
+              />
+            </div>
           )}
           <button className="ghost small" onClick={() => setCookiesOpen(true)} title={t("Cookie, которые поставили серверы, — у каждого окружения свои", "Cookies the servers set — each environment has its own")}>
             {t("Cookie", "Cookies")}
           </button>
-          <button className="ghost small" onClick={() => setSettingsOpen(true)} title={t("Прокси и клиентские сертификаты", "Proxy and client certificates")}>
+          <button className="ghost small" onClick={() => setSettingsOpen(true)} title={t("Язык, прокси и клиентские сертификаты", "Language, proxy and client certificates")}>
             {t("Настройки", "Settings")}
           </button>
           <span className="faint small save-state">{saveState === "saving" ? t("сохраняю…", "saving…") : saveState === "saved" ? t("сохранено", "saved") : ""}</span>

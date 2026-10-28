@@ -368,3 +368,91 @@ fn aws_signature_from_postman_and_insomnia() {
     .unwrap();
     assert_eq!(find(&read(&insomnia).unwrap(), "S3").request.auth, want);
 }
+
+#[test]
+fn openapi_split_into_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let put = |path: &str, text: &str| {
+        let path = dir.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    put(
+        "openapi.yaml",
+        r#"
+openapi: 3.0.3
+info: {title: Зоомагазин, version: "1"}
+servers: [{url: "https://zoo.test/api"}]
+paths:
+  /pets/{id}:
+    get:
+      summary: Питомец
+      parameters:
+        - $ref: 'common/params.yaml#/PetId'
+      responses:
+        '200':
+          description: питомец
+          content:
+            application/json:
+              schema: {$ref: 'schemas/pet.yaml'}
+        default: {$ref: 'common/responses.yaml#/Error'}
+  /orders: {$ref: 'paths/orders.yaml'}
+  /remote:
+    get:
+      summary: Далеко
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: 'https://example.com/schemas/x.json'}
+components:
+  schemas:
+    Tag: {type: string, example: кот}
+"#,
+    );
+    put("common/params.yaml", "PetId:\n  name: id\n  in: path\n  required: true\n  schema: {type: integer, example: 7}\n");
+    put("common/responses.yaml", "Error:\n  description: ошибка\n  content:\n    application/json:\n      schema: {$ref: '../schemas/error.json'}\n");
+    put(
+        "schemas/pet.yaml",
+        r#"
+type: object
+required: [id, owner]
+properties:
+  id: {type: integer}
+  name: {type: string, example: Мурка}
+  default: {type: boolean}
+  owner: {$ref: './owner.yaml#/Owner'}
+  tags: {type: array, items: {$ref: '../openapi.yaml#/components/schemas/Tag'}}
+"#,
+    );
+    put("schemas/owner.yaml", "Owner:\n  type: object\n  properties:\n    name: {type: string, example: Аня}\n    pets: {type: array, items: {$ref: 'pet.yaml'}}\n");
+    put("schemas/error.json", r#"{"type": "object", "properties": {"message": {"type": "string"}}}"#);
+    put(
+        "paths/orders.yaml",
+        "post:\n  summary: Заказ\n  requestBody:\n    content:\n      application/json:\n        schema: {$ref: '../schemas/pet.yaml'}\n  responses:\n    '201': {description: создан}\n",
+    );
+
+    let i = read(&dir.path().join("openapi.yaml")).unwrap();
+    let pet = &find(&i, "Питомец").request;
+    assert_eq!(pet.url, "{{base_url}}/pets/7", "параметр из другого файла");
+    assert_eq!(pet.checks, [Check::new("status == 200"), Check::new("$ schema schemas/pet.json")]);
+
+    let files: BTreeMap<&str, Value> = i.files.iter().map(|(p, t)| (p.as_str(), serde_json::from_str(t).unwrap())).collect();
+    assert_eq!(files["schemas/pet.json"]["properties"]["owner"], serde_json::json!({"$ref": "Owner.json"}));
+    assert_eq!(files["schemas/pet.json"]["properties"]["tags"]["items"], serde_json::json!({"$ref": "Tag.json"}), "обратно в главный файл");
+    assert_eq!(files["schemas/pet.json"]["properties"]["default"], serde_json::json!({"type": "boolean"}), "свойство с именем default");
+    assert_eq!(files["schemas/Owner.json"]["properties"]["pets"]["items"], serde_json::json!({"$ref": "pet.json"}), "круг между файлами");
+
+    let order = &find(&i, "Заказ").request;
+    let Body::Json { content } = &order.body else { panic!("{:?}", order.body) };
+    let body: Value = serde_json::from_str(content).unwrap();
+    assert_eq!((body["name"].as_str(), body["owner"]["name"].as_str(), body["tags"][0].as_str()), (Some("Мурка"), Some("Аня"), Some("кот")));
+
+    assert!(warned(&i, "ссылки по сети не загружаются: https://example.com/schemas/x.json"), "{:?}", i.warnings);
+    assert!(!i.warnings.iter().any(|w| w.contains("не прочитана") || w.contains("никуда")), "{:?}", i.warnings);
+
+    // The same text pasted has no folder to read the files from.
+    let pasted = parse(&std::fs::read_to_string(dir.path().join("openapi.yaml")).unwrap()).unwrap();
+    assert!(warned(&pasted, "импортируйте само описание файлом"), "{:?}", pasted.warnings);
+}

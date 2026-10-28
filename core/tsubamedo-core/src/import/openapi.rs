@@ -507,7 +507,11 @@ impl Spec<'_> {
         for _ in 0..16 {
             let Some(r) = current.get("$ref").and_then(Value::as_str) else { return current };
             let Some(pointer) = r.strip_prefix('#') else {
-                self.warnings.push(format!("ссылки на другие файлы не поддерживаются: {r}"));
+                self.warnings.push(if r.starts_with("http://") || r.starts_with("https://") {
+                    format!("ссылки по сети не загружаются: {r}")
+                } else {
+                    format!("ссылка на другой файл {r} не прочитана: импортируйте само описание файлом, а не текстом")
+                });
                 return Value::Null;
             };
             match self.doc.pointer(pointer) {

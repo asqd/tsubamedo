@@ -23,6 +23,7 @@ use crate::request_file::RequestFile;
 use crate::template::Vars;
 use crate::{Error, Result, prepare, scripts};
 
+mod bundle;
 mod har;
 mod insomnia;
 mod openapi;
@@ -124,7 +125,7 @@ pub fn read(path: &Path) -> Result<Imported> {
         return Err(Error::Invalid(format!("{}: файл больше {} МБ — это не коллекция", path.display(), SIZE_LIMIT >> 20)));
     }
     let text = fs::read_to_string(path).map_err(|e| Error::io(path, e))?;
-    let mut imported = parse(&text).map_err(|e| match e {
+    let mut imported = parse_from(&text, Some(path)).map_err(|e| match e {
         Error::Invalid(message) => Error::Parse { path: path.to_path_buf(), message },
         e => e,
     })?;
@@ -136,8 +137,13 @@ pub fn read(path: &Path) -> Result<Imported> {
 
 /// Finds the format by the content: file extensions lie, `.json` holds all of them.
 pub fn parse(text: &str) -> Result<Imported> {
+    parse_from(text, None)
+}
+
+/// `file` is where the text came from: an OpenAPI description may refer to files next to it.
+fn parse_from(text: &str, file: Option<&Path>) -> Result<Imported> {
     let text = text.trim_start_matches('\u{feff}');
-    let doc: Value = if text.trim_start().starts_with(['{', '[']) {
+    let mut doc: Value = if text.trim_start().starts_with(['{', '[']) {
         serde_json::from_str(text).map_err(|e| Error::Invalid(format!("не JSON: {e}")))?
     } else {
         serde_yaml_ng::from_str(text).map_err(|e| Error::Invalid(format!("ни JSON, ни YAML: {e}")))?
@@ -151,10 +157,11 @@ pub fn parse(text: &str) -> Result<Imported> {
         postman::collection(&doc)?
     } else if doc.get("_postman_variable_scope").is_some() || (doc.get("values").is_some_and(Value::is_array) && doc.get("name").is_some()) {
         postman::environment(&doc)
-    } else if doc.get("openapi").is_some() {
-        openapi::v3(&doc)?
-    } else if doc.get("swagger").is_some() {
-        openapi::v2(&doc)?
+    } else if doc.get("openapi").is_some() || doc.get("swagger").is_some() {
+        let outside = file.map(|f| bundle::bundle(&mut doc, f)).unwrap_or_default();
+        let mut imported = if doc.get("openapi").is_some() { openapi::v3(&doc)? } else { openapi::v2(&doc)? };
+        imported.warnings.splice(0..0, outside);
+        imported
     } else if doc.pointer("/log/entries").is_some() {
         har::har(&doc)?
     } else {

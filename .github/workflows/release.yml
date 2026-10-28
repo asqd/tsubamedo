@@ -4,18 +4,13 @@ name: Release
 # DMGs for Apple Silicon and Intel, an NSIS installer for Windows x64, AppImages and .deb
 # packages for Linux x86_64 and ARM64. No signing certificates: see docs/RELEASE.md.
 #
-# A tag v<version> puts them on a draft release of that tag, published by hand. A change to the
-# packaging builds them all, to see that they still build; so does running the workflow by hand.
+# A tag v<version> puts them on a draft release of that tag, published by hand. Running the
+# workflow by hand builds them all without a release, to see that they still build after a
+# change to the packaging: the macOS runner is the dearest, so nothing starts it on its own.
 
 on:
   push:
     tags: ["v*"]
-    branches: ["**"]
-    paths:
-      - .github/workflows/release.yml
-      - apps/desktop/src-tauri/tauri.conf.json
-      - scripts/release.sh
-      - scripts/version.sh
   workflow_dispatch:
 
 permissions:

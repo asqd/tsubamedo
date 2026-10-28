@@ -31,6 +31,11 @@
 //! `schema` (JSON Schema, see [`crate::schema`]; each match of the path is checked); `not`
 //! before the word ones. The value is JSON (`200`, `"text"`, `true`, `null`, `[1, 2]`) or, when it
 //! is not, plain text. `{{variables}}` work anywhere in the line.
+//!
+//! A path with `*`, `..`, a filter, a slice or several names in brackets matches a list of
+//! values. `count`, `exists`, `empty`, `contains` and `==`/`!=` with a list look at the list as a
+//! whole (`count` is the number of matches); the other conditions hold for each match and fail
+//! when nothing matched: `$.items[*].price > 0` is every price.
 
 use std::io::Read;
 use std::path::Path;
@@ -55,7 +60,8 @@ enum Source {
     Size,
     Header(String),
     Body,
-    Path(JsonPath, String),
+    /// The path, as written, and whether it may match more than one value.
+    Path(JsonPath, String, bool),
 }
 
 /// Where a value is in the response.
@@ -124,7 +130,7 @@ impl Query {
             let end = path_end(text);
             let path = &text[..end];
             let parsed = JsonPath::parse(path).map_err(|e| format!("JSONPath «{path}»: {e}"))?;
-            (Source::Path(parsed, path.to_string()), &text[end..])
+            (Source::Path(parsed, path.to_string(), many(path)), &text[end..])
         } else {
             let (word, rest) = next_word(text);
             match word {
@@ -169,8 +175,11 @@ impl Query {
                 (!values.is_empty()).then(|| Value::String(values.join(", ")))
             }
             Source::Body => Some(Value::String(r.text()?.to_string())),
-            Source::Path(path, _) => {
+            Source::Path(path, _, many) => {
                 let nodes = path.query(r.json()?).all();
+                if self.count && *many {
+                    return Ok(Some(Value::from(nodes.len())));
+                }
                 match nodes.as_slice() {
                     [] => None,
                     [one] => Some((*one).clone()),
@@ -197,10 +206,38 @@ impl Query {
             Source::Size => "size".into(),
             Source::Header(name) => format!("заголовка {name}"),
             Source::Body => "тела".into(),
-            Source::Path(_, path) => path.clone(),
+            Source::Path(_, path, _) => path.clone(),
         };
         if self.count { format!("{base} count") } else { base }
     }
+}
+
+/// Whether a path may match more than one value: a wildcard, descendants, a filter, a slice or
+/// a list of selectors anywhere outside quoted names.
+fn many(path: &str) -> bool {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut prev = ' ';
+    for c in path.chars() {
+        if let Some(q) = quote {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == q {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' => quote = Some(c),
+            '*' | '?' | ':' | ',' => return true,
+            '.' if prev == '.' => return true,
+            _ => {}
+        }
+        prev = c;
+    }
+    false
 }
 
 /// The end of a JSONPath: the first space outside brackets and quotes.
@@ -306,6 +343,48 @@ impl Rule {
             return Err(format!("сравнивать на больше-меньше можно только с числом, а не «{value}»"));
         }
         Ok(Rule { query, op, not, expected })
+    }
+
+    /// Whether the condition holds for each match of a path, rather than for the list of them.
+    fn each(&self) -> bool {
+        match self.op {
+            Op::Eq | Op::Ne => !self.expected.is_array(),
+            Op::Lt | Op::Le | Op::Gt | Op::Ge | Op::Matches => true,
+            Op::Contains | Op::Exists | Op::Empty | Op::Schema => false,
+        }
+    }
+
+    /// A path that may match many values: the condition for each match, or for the list of them.
+    fn check_many(&self, path: &JsonPath, text: &str, answer: &Answer) -> Result<(bool, Option<String>, Option<String>), String> {
+        let found = located(path, answer)?;
+        let list = Value::Array(found.iter().map(|(_, v)| (*v).clone()).collect());
+        let shown = Some(short(&list));
+        if !self.each() {
+            let actual = (!found.is_empty() || self.op != Op::Exists).then_some(&list);
+            return Ok(match self.check(actual) {
+                Ok(ok) => (ok, shown, None),
+                Err(e) => (false, shown, Some(e)),
+            });
+        }
+        if found.is_empty() {
+            return Err(format!("в ответе нет {text}"));
+        }
+        let wrong: Vec<String> = found
+            .iter()
+            .filter_map(|(at, value)| match self.check(Some(value)) {
+                Ok(true) => None,
+                Ok(false) => Some(format!("{}: пришло {}", crate::schema::path(at), short(value))),
+                Err(e) => Some(format!("{}: {e}", crate::schema::path(at))),
+            })
+            .collect();
+        if wrong.is_empty() {
+            return Ok((true, shown, None));
+        }
+        let mut why = wrong.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+        if wrong.len() > 3 {
+            why += &format!(" и ещё {}", wrong.len() - 3);
+        }
+        Ok((false, shown, Some(why)))
     }
 
     fn check(&self, actual: Option<&Value>) -> Result<bool, String> {
@@ -455,6 +534,14 @@ pub fn run_checks(checks: &[Check], answer: &Answer, vars: &Vars, dir: Option<&P
                     Ok(Err(why)) => failed(why),
                 };
             }
+            if let Source::Path(path, text, true) = &rule.query.source
+                && !rule.query.count
+            {
+                return match rule.check_many(path, text, answer) {
+                    Ok((ok, actual, error)) => CheckResult { check: c.text.clone(), ok, actual, error },
+                    Err(e) => failed(e),
+                };
+            }
             let actual = match rule.query.eval(answer) {
                 Ok(actual) => actual,
                 Err(e) => return failed(e),
@@ -475,19 +562,12 @@ type Located<'a> = (Vec<String>, std::borrow::Cow<'a, Value>);
 fn schema_values<'a>(query: &Query, answer: &'a Answer) -> Result<Vec<Located<'a>>, String> {
     use std::borrow::Cow;
     match &query.source {
-        Source::Path(path, text) if !query.count => {
-            let nodes = path.query_located(answer.json()?);
-            if nodes.is_empty() {
+        Source::Path(path, text, _) if !query.count => {
+            let found = located(path, answer)?;
+            if found.is_empty() {
                 return Err(format!("в ответе нет {text}"));
             }
-            Ok(nodes
-                .into_iter()
-                .map(|n| {
-                    let pointer = n.location().to_json_pointer();
-                    let at = pointer.split('/').skip(1).map(|t| t.replace("~1", "/").replace("~0", "~")).collect();
-                    (at, Cow::Borrowed(n.node()))
-                })
-                .collect())
+            Ok(found.into_iter().map(|(at, v)| (at, Cow::Borrowed(v))).collect())
         }
         Source::Body if !query.count => Ok(vec![(Vec::new(), Cow::Borrowed(answer.json()?))]),
         _ => match query.eval(answer)? {
@@ -495,6 +575,19 @@ fn schema_values<'a>(query: &Query, answer: &'a Answer) -> Result<Vec<Located<'a
             None => Err(format!("в ответе нет {}", query.describe())),
         },
     }
+}
+
+/// Every match of a path with its place, as the parts of `$.items[2].price`.
+fn located<'a>(path: &JsonPath, answer: &'a Answer) -> Result<Vec<(Vec<String>, &'a Value)>, String> {
+    Ok(path
+        .query_located(answer.json()?)
+        .into_iter()
+        .map(|n| {
+            let pointer = n.location().to_json_pointer();
+            let at = pointer.split('/').skip(1).map(|t| t.replace("~1", "/").replace("~0", "~")).collect();
+            (at, n.node())
+        })
+        .collect())
 }
 
 /// Reads the enabled captures: strings as they are, other JSON as JSON text.
@@ -607,6 +700,63 @@ mod tests {
         let got = results(&html, &["$.a exists", "body contains html"], &Vars::new());
         assert!(got[0].2.as_deref().unwrap().starts_with("ответ не JSON"));
         assert!(got[1].0);
+    }
+
+    #[test]
+    fn paths_with_many_matches() {
+        let r = response(200, r#"{"items":[{"id":1,"price":10,"name":"a"},{"id":2,"price":25,"name":"b"},{"id":3,"price":"x","name":"c"}],"none":[]}"#);
+        let passing = [
+            "$.items[0:2].price > 0",
+            "$.items[*].id >= 1",
+            "$..id < 4",
+            "$.items[*].name matches ^[a-c]$",
+            "$.items[*].name != z",
+            "$.items[?@.id == 2].price == 25",
+            "$.items[*].price contains 25",
+            "$.items[*].price not contains 7",
+            "$.items[*].id == [1, 2, 3]",
+            "$.items[*].id count == 3",
+            "$.items[?@.id > 1] count == 2",
+            "$.items[?@.id == 2] count == 1",
+            "$.items[?@.id > 9] count == 0",
+            "$.items[?@.id > 9] empty",
+            "$.items[?@.id > 9] not exists",
+            "$.items[*] exists",
+            "$.items['a,b'] not exists",
+            "$['it*ms'] not exists",
+        ];
+        for (line, (ok, actual, error)) in passing.iter().zip(results(&r, &passing, &Vars::new())) {
+            assert!(ok, "{line}: {actual:?} {error:?}");
+        }
+        let got = results(&r, &["$.items[*].price > 0", "$.items[*].id > 1", "$.items[?@.id > 9].price > 0", "$.none[*] == 1", "$.items[*].id contains 7"], &Vars::new());
+        assert_eq!(got[0].2.as_deref(), Some("$.items[2].price: \"x\" не число"));
+        assert_eq!(got[0].1.as_deref(), Some("[10,25,\"x\"]"));
+        assert_eq!(got[1].2.as_deref(), Some("$.items[0].id: пришло 1"));
+        assert_eq!(got[2].2.as_deref(), Some("в ответе нет $.items[?@.id > 9].price"));
+        assert_eq!(got[3].2.as_deref(), Some("в ответе нет $.none[*]"));
+        assert_eq!(got[4], (false, Some("[1,2,3]".into()), None));
+        assert!(got.iter().all(|g| !g.0));
+
+        for (path, expected) in [
+            ("$.a.b[0]", false),
+            ("$['a*b'][\"c,d\"]", false),
+            ("$.a[-1]", false),
+            ("$.a[*]", true),
+            ("$.*", true),
+            ("$..a", true),
+            ("$.a[1:]", true),
+            ("$.a[0,1]", true),
+            ("$.a[?@.b == 'x']", true),
+        ] {
+            assert_eq!(many(path), expected, "{path}");
+        }
+
+        let many: String = (0..6).map(|i| format!("{{\"n\":{i}}}")).collect::<Vec<_>>().join(",");
+        let r = response(200, &format!("[{many}]"));
+        let got = results(&r, &["$[*].n > 1"], &Vars::new());
+        assert_eq!(got[0].2.as_deref(), Some("$[0].n: пришло 0; $[1].n: пришло 1"));
+        let got = results(&r, &["$[*].n > 9"], &Vars::new());
+        assert_eq!(got[0].2.as_deref(), Some("$[0].n: пришло 0; $[1].n: пришло 1; $[2].n: пришло 2 и ещё 3"));
     }
 
     #[test]

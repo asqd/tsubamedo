@@ -3,7 +3,7 @@ url = "{{base}}/items"
 checks = [
   'status == 200',
   '$.items count > 0',
-  '$.items[0].price > 0',
+  '$.items[*].price > 0',
   'time < 500',
 ]
 

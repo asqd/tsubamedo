@@ -72,6 +72,9 @@ export function ChecksEditor({
         после него <code>count</code> — длина. Условия: <code>==</code> <code>!=</code> <code>&lt;</code> <code>&gt;</code> <code>contains</code> <code>matches</code>{" "}
         <code>exists</code> <code>empty</code>, перед словами можно <code>not</code>. Значение — JSON или просто текст, <code>{"{{переменные}}"}</code> работают.
         <br />
+        Путь с <code>*</code>, <code>..</code> или фильтром: <code>$.items[*].price &gt; 0</code> — каждое совпадение; <code>count</code>,{" "}
+        <code>exists</code>, <code>empty</code> и <code>contains</code> — про весь список.
+        <br />
         JSON Schema: <code>$ schema schemas/order.json</code> — файл ищется от папки запроса вверх до корня коллекции;{" "}
         <code>{'$.items[*] schema {"required": ["id"]}'}</code> — схема прямо в строке, каждое совпадение пути проверяется отдельно.
       </div>

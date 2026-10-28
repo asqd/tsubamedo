@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TsubameDo — лёгкий HTTP-клиент без аккаунта</title>
-  <meta name="description" content="HTTP-клиент для работы с API, как Insomnia, но лёгкий: окно за секунду, ответы на сотни мегабайт, коллекции — файлы в git, без аккаунта и облака. macOS, Windows, Linux и CLI для CI.">
+  <title>TsubameDo — лёгкий клиент для REST API</title>
+  <meta name="description" content="Бесплатный клиент для REST API на macOS, Windows и Linux. Быстро запускается, открывает ответы на сотни мегабайт, хранит коллекции в git. Регистрация не нужна.">
   <meta name="color-scheme" content="light dark">
   <meta property="og:title" content="TsubameDo">
-  <meta property="og:description" content="Лёгкий HTTP-клиент: ответы на сотни мегабайт, коллекции в git, без аккаунта.">
+  <meta property="og:description" content="Лёгкий клиент для REST API: большие ответы, коллекции в git, без регистрации.">
   <meta property="og:image" content="assets/og.png">
   <link rel="icon" type="image/png" href="assets/favicon-64.png">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
@@ -33,18 +33,36 @@
 
 <main>
   <section class="hero wrap">
-    <p class="kicker mono">REST · JSON · GraphQL-тела &nbsp;/&nbsp; macOS · Windows · Linux · CLI</p>
-    <h1>HTTP-клиент, который не&nbsp;тяжелеет</h1>
+    <h1>Лёгкий клиент для&nbsp;REST&nbsp;API</h1>
     <p class="lead">
-      Как Insomnia, но окно открывается меньше чем за секунду, JSON на&nbsp;сотни мегабайт листается сразу,
-      а&nbsp;коллекции — обычные файлы рядом с&nbsp;кодом. Без аккаунта, облака и&nbsp;телеметрии.
+      Отправляйте запросы, проверяйте ответы и&nbsp;храните коллекции в&nbsp;git вместе с&nbsp;кодом.
+      Окно открывается за&nbsp;секунду, ответ на&nbsp;сотни мегабайт листается без задержек.
+      Регистрироваться не&nbsp;нужно.
     </p>
     <div class="cta">
-      <a class="btn primary" data-file="macos-apple-silicon.dmg" href="#download">Скачать для macOS · Apple Silicon</a>
-      <a class="btn" data-file="macos-intel.dmg" href="#download">Intel</a>
-      <a class="btn quiet" href="#download">Windows, Linux, CLI</a>
+      <div class="get">
+        <a class="btn primary get-btn" href="#download" aria-haspopup="menu" aria-expanded="false">
+          Скачать
+          <svg width="11" height="7" viewBox="0 0 11 7" aria-hidden="true"><path d="M1 1.2l4.5 4.5L10 1.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <div class="get-menu" role="menu" hidden>
+          <div class="get-group" data-os="mac">macOS 12 и новее</div>
+          <a role="menuitem" data-file="macos-apple-silicon.dmg" href="#download"><span>Apple Silicon <span class="faint">(M1 и новее)</span></span><small class="size"></small></a>
+          <a role="menuitem" data-file="macos-intel.dmg" href="#download"><span>Intel</span><small class="size"></small></a>
+          <div class="get-group" data-os="windows">Windows 10, 11</div>
+          <a role="menuitem" data-file="windows-x64-setup.exe" href="#download"><span>Установщик x64</span><small class="size"></small></a>
+          <div class="get-group" data-os="linux">Linux</div>
+          <a role="menuitem" data-file="linux-x86_64.AppImage" href="#download"><span>AppImage x86_64</span><small class="size"></small></a>
+          <a role="menuitem" data-file="_amd64.deb" href="#download"><span>.deb x86_64</span><small class="size"></small></a>
+          <a role="menuitem" data-file="linux-aarch64.AppImage" href="#download"><span>AppImage ARM64</span><small class="size"></small></a>
+          <a role="menuitem" data-file="_arm64.deb" href="#download"><span>.deb ARM64</span><small class="size"></small></a>
+          <div class="get-sep"></div>
+          <a role="menuitem" href="#cli"><span>Для терминала и CI</span><small>CLI</small></a>
+        </div>
+      </div>
+      <a class="btn quiet" data-repo="" href="https://github.com/asqd/tsubamedo">Исходный код</a>
     </div>
-    <p class="release faint small" id="release">Версия и размеры — на <a data-repo="/releases/latest" href="https://github.com/asqd/tsubamedo/releases/latest">странице выпуска</a>.</p>
+    <p class="release faint small" id="release">Бесплатно, для macOS, Windows и Linux.</p>
     <figure class="window">
       <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
       <picture>
@@ -55,46 +73,55 @@
   </section>
 
   <section class="numbers wrap">
-    <div><b>0,9&nbsp;с</b><span>до окна после запуска</span></div>
-    <div><b>111&nbsp;МБ</b><span>памяти в покое, вместе с WebView</span></div>
-    <div><b>0,2&nbsp;с</b><span>на форматирование JSON в 263&nbsp;МБ — 28&nbsp;млн строк листаются сразу</span></div>
-    <div><b>9&nbsp;МБ</b><span>DMG для Apple Silicon</span></div>
+    <div><b>0,9&nbsp;с</b><span>от запуска до готового окна</span></div>
+    <div><b>111&nbsp;МБ</b><span>памяти в простое</span></div>
+    <div><b>0,2&nbsp;с</b><span>чтобы отформатировать JSON на&nbsp;263&nbsp;МБ</span></div>
+    <div><b>9&nbsp;МБ</b><span>весит установщик для Mac</span></div>
+  </section>
+
+  <section class="wrap why">
+    <h2>Зачем ещё один клиент</h2>
+    <p>
+      Мне надоело, что Insomnia долго запускается, зависает на&nbsp;больших ответах и&nbsp;просит завести аккаунт,
+      чтобы отправить запрос. Хотелось программу, которая открывается сразу, спокойно показывает JSON на&nbsp;сотни
+      мегабайт и&nbsp;хранит всё в&nbsp;обычных файлах. Так появился TsubameDo.
+    </p>
   </section>
 
   <section id="features" class="wrap">
     <h2>Что умеет</h2>
     <div class="grid">
       <article>
-        <h3>Коллекции — файлы в git</h3>
-        <p>Один запрос — один TOML-файл. Приложение меняет только строки, которые вы правили, так что в&nbsp;диффе видна ровно ваша правка. Секреты — в&nbsp;<code>*.local.toml</code>, которые в&nbsp;git не попадают.</p>
+        <h3>Коллекции в git</h3>
+        <p>Каждый запрос лежит в&nbsp;своём TOML-файле. При сохранении меняются только строки, которые вы правили, так что диффы остаются чистыми. Пароли и&nbsp;токены можно вынести в&nbsp;<code>*.local.toml</code>, в&nbsp;git они не попадут.</p>
       </article>
       <article>
         <h3>Большие ответы</h3>
-        <p>Тело больше 8&nbsp;МБ сразу уходит во временный файл: ответ на 263&nbsp;МБ скачивается за 0,24&nbsp;с и занимает 30&nbsp;МБ памяти. Поиск, сворачивание, фильтр JSONPath — по всему ответу.</p>
+        <p>Ответ больше 8&nbsp;МБ пишется во&nbsp;временный файл, а&nbsp;не&nbsp;в&nbsp;память. JSON на&nbsp;263&nbsp;МБ скачивается за&nbsp;четверть секунды и&nbsp;занимает около 30&nbsp;МБ. Поиск и&nbsp;фильтр по&nbsp;JSONPath работают по&nbsp;всему ответу.</p>
       </article>
       <article>
         <h3>Цепочки и проверки</h3>
-        <p><code>[capture] token = '$.token'</code> — и другие запросы пишут просто <code>{{token}}</code>; вход отправится сам, когда токена нет. Проверки строками: <code>status == 200</code>, <code>$.items count &gt; 0</code>, JSON Schema.</p>
+        <p>Строка <code>[capture] token = '$.token'</code> достаёт токен из&nbsp;ответа, и&nbsp;остальные запросы пишут просто <code>{{token}}</code>. Если токена ещё нет, вход отправится сам. Проверки пишутся по&nbsp;одной на&nbsp;строку: <code>status == 200</code>.</p>
       </article>
       <article>
-        <h3>Скрипты Postman и Insomnia</h3>
-        <p>JavaScript до и после запроса. <code>pm.test</code>, <code>pm.expect</code>, <code>pm.environment</code>, <code>CryptoJS</code> работают как есть — переезд не ломает тесты.</p>
+        <h3>Скрипты из Postman</h3>
+        <p>Можно запускать JavaScript до и&nbsp;после запроса. Тесты из&nbsp;Postman и&nbsp;Insomnia с&nbsp;<code>pm.test</code>, <code>pm.expect</code> и&nbsp;<code>CryptoJS</code> работают без переделки.</p>
       </article>
       <article>
         <h3>Импорт</h3>
-        <p>Insomnia (v4 и v5), коллекции и окружения Postman, OpenAPI&nbsp;3 и Swagger&nbsp;2 со схемами ответов, HAR из браузера, команда curl, вставленная в адрес.</p>
+        <p>Переносит коллекции и&nbsp;окружения из&nbsp;Insomnia и&nbsp;Postman, читает OpenAPI&nbsp;3, Swagger&nbsp;2 и&nbsp;HAR из&nbsp;браузера. Команду curl достаточно вставить в&nbsp;строку адреса.</p>
       </article>
       <article>
         <h3>Авторизация и сеть</h3>
-        <p>OAuth&nbsp;2.0 (вход в браузере с PKCE, client credentials, обновление токена), Digest, cookie по окружениям, системный прокси и SOCKS5, клиентские сертификаты PEM и .p12.</p>
+        <p>OAuth&nbsp;2.0 со&nbsp;входом через браузер, Digest, отдельные cookie для каждого окружения. Работает через системный прокси и&nbsp;SOCKS5, поддерживает клиентские сертификаты.</p>
       </article>
       <article>
-        <h3>Сравнение stage и prod</h3>
-        <p>Тот же запрос в другом окружении или прошлый ответ из истории: JSON по смыслу, с путём каждого изменения; изменчивые заголовки и поля можно не сравнивать.</p>
+        <h3>Сравнение ответов</h3>
+        <p>Отправьте запрос на&nbsp;stage и&nbsp;prod и&nbsp;посмотрите, чем ответы отличаются. JSON сравнивается по&nbsp;содержимому, а&nbsp;не построчно, и&nbsp;у&nbsp;каждого отличия виден путь.</p>
       </article>
       <article>
-        <h3>Код на 16 языках</h3>
-        <p>curl, Python, JavaScript и Node.js, Go, Java, Kotlin, C#, PHP, Ruby, Swift, Rust, Dart, C, HTTPie, wget, PowerShell — с подставленными переменными.</p>
+        <h3>Код запроса</h3>
+        <p>Готовый код для curl, Python, JavaScript, Go, Java, C#, PHP и&nbsp;ещё десятка языков. Переменные уже подставлены.</p>
       </article>
     </div>
   </section>
@@ -106,7 +133,7 @@
         <source srcset="assets/shots/checks-dark.png" media="(prefers-color-scheme: dark)">
         <img src="assets/shots/checks-light.png" width="1360" height="820" loading="lazy" alt="Вкладка «Проверки»: четыре проверки ответа, все прошли">
       </picture>
-      <figcaption>Проверки пишутся строками и проверяются ядром прямо при вводе.</figcaption>
+      <figcaption>Проверки пишутся по&nbsp;одной на&nbsp;строку. Ошибку в&nbsp;условии видно сразу, ещё до&nbsp;отправки.</figcaption>
     </figure>
     <figure class="window">
       <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -114,7 +141,7 @@
         <source srcset="assets/shots/compare-dark.png" media="(prefers-color-scheme: dark)">
         <img src="assets/shots/compare-light.png" width="1360" height="820" loading="lazy" alt="Сравнение ответов stage и prod: изменения цены, новый товар, версия">
       </picture>
-      <figcaption>stage ⟷ prod: элементы массивов сопоставляются по <code>id</code>, вставка — одно изменение.</figcaption>
+      <figcaption>Ответы stage и&nbsp;prod. Элементы массивов сопоставляются по&nbsp;<code>id</code>, поэтому новый товар в&nbsp;середине списка не&nbsp;сдвигает остальные.</figcaption>
     </figure>
     <figure class="window">
       <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -122,13 +149,13 @@
         <source srcset="assets/shots/code-dark.png" media="(prefers-color-scheme: dark)">
         <img src="assets/shots/code-light.png" width="1360" height="820" loading="lazy" alt="Диалог «Код запроса»: запрос на Python с requests">
       </picture>
-      <figcaption>«Код…»: JSON для requests — словарём, файлы — путями.</figcaption>
+      <figcaption>Тот же запрос на&nbsp;Python. JSON передаётся словарём, файлы указаны путями.</figcaption>
     </figure>
   </section>
 
   <section id="download" class="wrap">
     <h2>Скачать</h2>
-    <p class="faint" id="download-note">Всё лежит на <a data-repo="/releases/latest" href="https://github.com/asqd/tsubamedo/releases/latest">странице выпуска</a> на GitHub, рядом — суммы SHA-256.</p>
+    <p class="faint" id="download-note">Все файлы лежат на&nbsp;<a data-repo="/releases/latest" href="https://github.com/asqd/tsubamedo/releases/latest">странице выпуска</a> на&nbsp;GitHub. Рядом с&nbsp;каждым есть сумма SHA-256.</p>
     <table class="files">
       <tbody>
         <tr><th>macOS 12+</th><td><a data-file="macos-apple-silicon.dmg" href="#">Apple Silicon (M1 и новее)</a></td><td><a data-file="macos-intel.dmg" href="#">Intel</a></td></tr>
@@ -142,8 +169,8 @@
   <section id="install" class="wrap">
     <h2>Установка</h2>
     <p>
-      TsubameDo не подписан сертификатом Apple и Microsoft: это стоит денег, а программа бесплатная и раздаётся напрямую.
-      Поэтому система при первом запуске переспросит. Ниже — как ответить ей один раз.
+      Программа не подписана сертификатами Apple и&nbsp;Microsoft. Они стоят денег, а&nbsp;TsubameDo бесплатный.
+      Поэтому при первом запуске система предупредит, что не знает автора. Подтвердить нужно один раз.
     </p>
 
     <div class="steps">
@@ -151,42 +178,42 @@
         <h3>macOS</h3>
         <ol>
           <li>Откройте DMG и перетащите TsubameDo в «Программы».</li>
-          <li>Запустите. macOS скажет, что не может проверить приложение, — нажмите «Готово».</li>
-          <li>Откройте «Системные настройки» → «Конфиденциальность и безопасность», внизу нажмите «Всё равно открыть» и введите пароль.</li>
+          <li>Запустите. macOS скажет, что не может проверить приложение. Нажмите «Готово».</li>
+          <li>Откройте «Системные настройки», раздел «Конфиденциальность и безопасность», и внизу нажмите «Всё равно открыть».</li>
         </ol>
-        <p class="small faint">На macOS 12–14 проще: щёлкните TsubameDo в «Программах» правой кнопкой → «Открыть» → «Открыть».</p>
-        <p class="small faint">Или одной командой в Терминале: <code>xattr -dr com.apple.quarantine /Applications/TsubameDo.app</code></p>
+        <p class="small faint">На macOS 12–14 проще: правой кнопкой по TsubameDo в «Программах», затем «Открыть».</p>
+        <p class="small faint">Можно и через Терминал: <code>xattr -dr com.apple.quarantine /Applications/TsubameDo.app</code></p>
       </article>
       <article>
         <h3>Windows</h3>
         <ol>
           <li>Запустите установщик.</li>
-          <li>SmartScreen скажет «Система Windows защитила ваш компьютер» — нажмите «Подробнее», потом «Выполнить в любом случае».</li>
+          <li>Если появится окно «Система Windows защитила ваш компьютер», нажмите «Подробнее» и «Выполнить в любом случае».</li>
         </ol>
-        <p class="small faint">WebView2, на котором работает окно, в Windows 10 и 11 уже есть; если нет, установщик его поставит.</p>
+        <p class="small faint">Окну нужен WebView2. В Windows 10 и 11 он обычно уже есть, а если нет, установщик скачает его сам.</p>
       </article>
       <article>
         <h3>Linux</h3>
         <ol>
           <li>AppImage: <code>chmod +x TsubameDo-*.AppImage</code> и запустите.</li>
-          <li>Или пакет: <code>sudo apt install ./tsubamedo_*.deb</code></li>
+          <li>Пакет для Debian и Ubuntu: <code>sudo apt install ./tsubamedo_*.deb</code></li>
         </ol>
-        <p class="small faint">Нужен WebKitGTK 4.1: Ubuntu 22.04, Debian 12, Fedora 38 и новее.</p>
+        <p class="small faint">Нужен WebKitGTK 4.1, он есть в Ubuntu 22.04, Debian 12, Fedora 38 и новее.</p>
       </article>
     </div>
 
-    <h3 class="sub">Проверить, что файл тот самый</h3>
+    <h3 class="sub">Как проверить файл</h3>
     <p>
-      Сравните сумму с файлом <code>.sha256</code> со страницы выпуска:
-      <code>shasum -a 256 ~/Downloads/TsubameDo-*.dmg</code> (macOS и Linux — <code>sha256sum</code>,
-      Windows — <code>Get-FileHash</code>).
+      Посчитайте сумму и сравните её с&nbsp;файлом <code>.sha256</code> со&nbsp;страницы выпуска.
+      На&nbsp;Mac это <code>shasum -a 256 ~/Downloads/TsubameDo-*.dmg</code>, на&nbsp;Linux <code>sha256sum</code>,
+      в&nbsp;Windows <code>Get-FileHash</code>.
     </p>
   </section>
 
   <section id="cli" class="wrap">
-    <h2>CLI для терминала и CI</h2>
-    <p>Те же коллекции из командной строки: проверки, цепочки, отчёт JUnit для GitLab, Jenkins и GitHub Actions. Скачанный через <code>curl</code> файл macOS не помечает, спрашивать ничего не придётся.</p>
-<pre class="code"><span class="faint"># macOS Apple Silicon; для Intel и Linux — имя архива со страницы выпуска</span>
+    <h2>Для терминала и CI</h2>
+    <p>Те же коллекции можно запускать из командной строки: с&nbsp;проверками, цепочками и&nbsp;отчётом JUnit, который понимают GitLab, Jenkins и&nbsp;GitHub Actions. Файл, скачанный через <code>curl</code>, macOS не блокирует.</p>
+<pre class="code"><span class="faint"># Mac на Apple Silicon. Для Intel и Linux возьмите имя архива со страницы выпуска</span>
 curl -L <span class="repo-url">https://github.com/asqd/tsubamedo</span>/releases/latest/download/<span id="cli-name">tsubamedo-ВЕРСИЯ-macos-apple-silicon.tar.gz</span> | tar xz
 sudo mv tsubamedo /usr/local/bin/
 
@@ -196,16 +223,17 @@ tsubamedo code orders/create -l python-requests</pre>
   </section>
 
   <section class="wrap privacy">
-    <h2>Ваши данные остаются у вас</h2>
+    <h2>Без аккаунта</h2>
     <p>
-      Ни аккаунта, ни облака, ни телеметрии. Коллекции лежат там, где вы их создали; история, cookie и токены —
-      в папке данных приложения на этом компьютере. TsubameDo сам никуда не ходит: в сеть уходят только ваши запросы.
+      Регистрироваться не нужно, и программа ничего не отправляет разработчику. Коллекции лежат в&nbsp;папке,
+      которую вы выбрали, а&nbsp;история, cookie и&nbsp;токены хранятся на&nbsp;вашем компьютере.
+      В&nbsp;сеть уходят только запросы, которые отправляете вы.
     </p>
   </section>
 </main>
 
 <footer class="wrap foot small faint">
-  <span>TsubameDo — ласточка: быстро и налегке.</span>
+  <span>Tsubame по-японски «ласточка».</span>
   <a data-repo="" href="https://github.com/asqd/tsubamedo">GitHub</a>
 </footer>
 

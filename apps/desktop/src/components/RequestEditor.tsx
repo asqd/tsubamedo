@@ -5,10 +5,10 @@ import { key } from "../platform";
 import { missingVars, useVars } from "../vars";
 import { ChecksEditor } from "./ChecksEditor";
 import { CodeEditor } from "./CodeEditor";
+import { MethodPicker } from "./MethodPicker";
 import { Field, freshOAuth, OAuthEditor } from "./OAuthEditor";
 import { PairsTable } from "./PairsTable";
 
-const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
 type Tab = "query" | "headers" | "auth" | "body" | "checks" | "scripts" | "options";
 
@@ -65,11 +65,7 @@ export function RequestEditor({
         </button>
       </div>
       <div className="urlbar">
-        <select className={`method m-${request.method.toLowerCase()}`} value={request.method} onChange={(e) => set({ method: e.target.value })}>
-          {(METHODS.includes(request.method) ? METHODS : [request.method, ...METHODS]).map((m) => (
-            <option key={m}>{m}</option>
-          ))}
-        </select>
+        <MethodPicker value={request.method} onChange={(method) => set({ method })} />
         <CodeEditor
           mode="line"
           className="url"

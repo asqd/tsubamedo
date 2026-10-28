@@ -129,7 +129,18 @@ code { font-family: var(--mono); font-size: 12px; }
 .req-name:hover:not(:disabled) { border-color: var(--line); }
 .req-name:disabled { color: var(--faint); font-weight: 400; }
 .urlbar { display: flex; gap: 6px; padding: 8px 14px 10px; }
-.urlbar .method { font: 600 12px var(--mono); width: 92px; flex: none; }
+.method-picker { position: relative; display: flex; flex: none; width: 92px; }
+.method-picker .method { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; padding: 4px 8px 4px 10px; border-color: var(--line); font: 600 12px var(--mono); }
+.method-picker .method:focus-visible, .method-picker .method[aria-expanded="true"] { outline: none; border-color: var(--accent); }
+.method-picker .chevron { flex: none; color: var(--faint); }
+.method-picker .method-menu { position: absolute; top: calc(100% + 4px); left: 0; min-width: 132px; font: 600 12px var(--mono); }
+.method-menu .menu-item { padding: 5px 10px; }
+.method-menu .menu-item:hover:not(:disabled) { background: transparent; color: inherit; }
+.method-menu .menu-item.m-get:hover { color: var(--m-get); } .method-menu .menu-item.m-post:hover { color: var(--m-post); }
+.method-menu .menu-item.m-put:hover { color: var(--m-put); } .method-menu .menu-item.m-patch:hover { color: var(--m-patch); }
+.method-menu .menu-item.m-delete:hover { color: var(--m-delete); }
+.method-menu .menu-item.m-head:hover, .method-menu .menu-item.m-options:hover { color: var(--m-other); }
+.method-menu .menu-item.hover, .method-menu .menu-item.hover:hover { background: var(--accent); color: var(--accent-fg); }
 
 .tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line); flex: none; overflow-x: auto; }
 .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); padding: 7px 8px 6px; white-space: nowrap; }

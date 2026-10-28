@@ -2,6 +2,7 @@
 // The language picked last is picked again next time.
 import { useEffect, useState } from "react";
 import { api, Language, Request } from "../api";
+import { LanguagePicker } from "./LanguagePicker";
 
 function storedLang(): string {
   try {
@@ -35,7 +36,6 @@ export function CodeDialog({ id, request, env, onClose }: { id: string | null; r
     });
   }, [lang, id, request, env]);
 
-  const groups = [...new Set(languages.map((l) => l.group))];
   const copy = async () => {
     if (code == null) return;
     try {
@@ -51,19 +51,7 @@ export function CodeDialog({ id, request, env, onClose }: { id: string | null; r
       <div className="modal code-dialog" role="dialog" aria-label="Код" onKeyDown={(e) => e.key === "Escape" && onClose()}>
         <div className="code-head">
           <h2>Код запроса</h2>
-          <select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Язык">
-            {groups.map((g) => (
-              <optgroup key={g} label={g}>
-                {languages
-                  .filter((l) => l.group === g)
-                  .map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.group === l.name || l.group === "Shell" ? l.name : `${l.group} — ${l.name}`}
-                    </option>
-                  ))}
-              </optgroup>
-            ))}
-          </select>
+          <LanguagePicker languages={languages} value={lang} onChange={setLang} />
           <span className="sp" />
           <button className="icon" title="Закрыть" onClick={onClose}>
             ×

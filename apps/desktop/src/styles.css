@@ -380,6 +380,16 @@ button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 .code-dialog { width: min(820px, 100%); display: flex; flex-direction: column; }
 .code-head { display: flex; align-items: center; gap: 12px; }
 .code-head h2 { margin: 0; }
+.language-picker { display: flex; flex: none; }
+.language-picker .language { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 190px; max-width: 280px; padding: 4px 8px 4px 10px; border-color: var(--line); }
+.language-picker .language:focus-visible, .language-picker .language[aria-expanded="true"] { outline: none; border-color: var(--accent); }
+.language-picker .chevron { flex: none; color: var(--faint); }
+.language-menu { min-width: 220px; overflow-y: auto; z-index: 60; }
+.language-menu .menu-group { padding: 8px 10px 2px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); }
+.language-menu [role="group"]:first-child .menu-group { padding-top: 4px; }
+.language-menu .menu-item { padding: 4px 10px 4px 18px; }
+.language-menu .menu-item:hover:not(:disabled) { background: transparent; color: inherit; }
+.language-menu .menu-item.hover, .language-menu .menu-item.hover:hover { background: var(--accent); color: var(--accent-fg); }
 .code-view { margin: 4px 0 0; padding: 10px 12px; max-height: 60vh; overflow: auto; background: var(--sunken); border-radius: 6px; font-size: 12px; line-height: 1.5; white-space: pre; user-select: text; }
 .modal-actions .faint { margin-right: auto; align-self: center; }
 .settings-dialog { width: min(680px, 100%); }

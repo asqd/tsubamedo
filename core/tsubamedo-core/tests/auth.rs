@@ -218,12 +218,14 @@ async fn digest_answers_the_challenge() {
 /// The signature against curl's own (`--aws-sigv4`), on what went: the query as the signer
 /// rewrote it, the body, a session token. The path needs no encoding: curl before 8.8 does not
 /// encode it twice for services other than S3, as AWS asks (the unit tests check that part).
-/// Skipped where curl has no SigV4.
+/// Skipped with curl older than 8.7, the one it was checked with: 7.81 of Ubuntu 22.04 leaves
+/// the `x-amz-*` headers given with `-H` out of its signature.
 #[tokio::test(flavor = "multi_thread")]
 async fn aws_signature_matches_curl() {
-    let help = std::process::Command::new("curl").args(["--help", "all"]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
-    if !help.is_ok_and(|h| h.contains("--aws-sigv4")) {
-        eprintln!("curl без --aws-sigv4, сверка пропущена");
+    let version = std::process::Command::new("curl").arg("--version").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    let number: Vec<u32> = version.split_whitespace().nth(1).unwrap_or_default().split('.').map_while(|n| n.parse().ok()).collect();
+    if number.as_slice() < [8, 7].as_slice() {
+        eprintln!("curl {number:?} старше 8.7, сверка с --aws-sigv4 пропущена");
         return;
     }
     let (addr, _) = server().await;

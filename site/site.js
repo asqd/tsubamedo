@@ -13,30 +13,6 @@
   for (const el of document.querySelectorAll(".repo-url")) el.textContent = base;
   for (const a of document.querySelectorAll("a[data-file]")) a.href = releases;
 
-  // «Скачать» opens the list of systems; the visitor's own is marked. A Mac cannot tell its
-  // processor to a page, so both Mac files stay side by side.
-  const button = document.querySelector(".get-btn");
-  const menu = document.querySelector(".get-menu");
-  const toggle = (open) => {
-    menu.hidden = !open;
-    button.setAttribute("aria-expanded", String(open));
-  };
-  button.addEventListener("click", (e) => {
-    e.preventDefault();
-    toggle(menu.hidden);
-  });
-  document.addEventListener("click", (e) => !e.target.closest(".get") && toggle(false));
-  document.addEventListener("keydown", (e) => e.key === "Escape" && toggle(false));
-  menu.addEventListener("click", (e) => e.target.closest("a") && toggle(false));
-
-  const ua = navigator.userAgent;
-  const os = /Mac/.test(ua) && !/iPhone|iPad/.test(ua) ? "mac" : /Windows/.test(ua) ? "windows" : /Linux/.test(ua) && !/Android/.test(ua) ? "linux" : null;
-  const group = os && menu.querySelector(`[data-os="${os}"]`);
-  if (group) {
-    group.classList.add("yours");
-    group.insertAdjacentHTML("beforeend", ' <span class="yours-note">· ваша система</span>');
-  }
-
   // `tsubamedo-*-linux-x86_64.tar.gz`: a pattern of the end of the file's name.
   const matcher = (pattern) => new RegExp(pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
   const mb = (bytes) => `${(bytes / 1048576).toFixed(1).replace(".", ",")} МБ`;
@@ -51,8 +27,6 @@
         if (!asset) continue;
         a.href = asset.browser_download_url;
         a.title = `${asset.name}, ${mb(asset.size)}`;
-        const size = a.querySelector(".size");
-        if (size) size.textContent = mb(asset.size);
       }
       const version = release.tag_name.replace(/^v/, "");
       const date = new Date(release.published_at).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });

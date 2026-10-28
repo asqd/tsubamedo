@@ -40,26 +40,7 @@
       Регистрироваться не&nbsp;нужно.
     </p>
     <div class="cta">
-      <div class="get">
-        <a class="btn primary get-btn" href="#download" aria-haspopup="menu" aria-expanded="false">
-          Скачать
-          <svg width="11" height="7" viewBox="0 0 11 7" aria-hidden="true"><path d="M1 1.2l4.5 4.5L10 1.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </a>
-        <div class="get-menu" role="menu" hidden>
-          <div class="get-group" data-os="mac">macOS 12 и новее</div>
-          <a role="menuitem" data-file="macos-apple-silicon.dmg" href="#download"><span>Apple Silicon <span class="faint">(M1 и новее)</span></span><small class="size"></small></a>
-          <a role="menuitem" data-file="macos-intel.dmg" href="#download"><span>Intel</span><small class="size"></small></a>
-          <div class="get-group" data-os="windows">Windows 10, 11</div>
-          <a role="menuitem" data-file="windows-x64-setup.exe" href="#download"><span>Установщик x64</span><small class="size"></small></a>
-          <div class="get-group" data-os="linux">Linux</div>
-          <a role="menuitem" data-file="linux-x86_64.AppImage" href="#download"><span>AppImage x86_64</span><small class="size"></small></a>
-          <a role="menuitem" data-file="_amd64.deb" href="#download"><span>.deb x86_64</span><small class="size"></small></a>
-          <a role="menuitem" data-file="linux-aarch64.AppImage" href="#download"><span>AppImage ARM64</span><small class="size"></small></a>
-          <a role="menuitem" data-file="_arm64.deb" href="#download"><span>.deb ARM64</span><small class="size"></small></a>
-          <div class="get-sep"></div>
-          <a role="menuitem" href="#cli"><span>Для терминала и CI</span><small>CLI</small></a>
-        </div>
-      </div>
+      <a class="btn primary" href="#download">Скачать</a>
       <a class="btn quiet" data-repo="" href="https://github.com/asqd/tsubamedo">Исходный код</a>
     </div>
     <p class="release faint small" id="release">Бесплатно, для macOS, Windows и Linux.</p>
@@ -155,7 +136,6 @@
 
   <section id="download" class="wrap">
     <h2>Скачать</h2>
-    <p class="faint" id="download-note">Все файлы лежат на&nbsp;<a data-repo="/releases/latest" href="https://github.com/asqd/tsubamedo/releases/latest">странице выпуска</a> на&nbsp;GitHub. Рядом с&nbsp;каждым есть сумма SHA-256.</p>
     <table class="files">
       <tbody>
         <tr><th>macOS 12+</th><td><a data-file="macos-apple-silicon.dmg" href="#">Apple Silicon (M1 и новее)</a></td><td><a data-file="macos-intel.dmg" href="#">Intel</a></td></tr>
@@ -169,8 +149,8 @@
   <section id="install" class="wrap">
     <h2>Установка</h2>
     <p>
-      Программа не подписана сертификатами Apple и&nbsp;Microsoft. Они стоят денег, а&nbsp;TsubameDo бесплатный.
-      Поэтому при первом запуске система предупредит, что не знает автора. Подтвердить нужно один раз.
+      Программа не подписана сертификатами Apple и&nbsp;Microsoft,
+      поэтому при первом запуске система предупредит, что не знает автора. Подтвердить нужно один раз.
     </p>
 
     <div class="steps">

@@ -43,6 +43,8 @@ code { background: var(--sunken); padding: .1em .35em; border-radius: 4px; overf
 .faint { color: var(--faint); }
 .wrap { width: min(1120px, 100%); margin: 0 auto; padding: 0 16px; }
 section.wrap { margin: 88px auto; }
+/* Links to a section leave room for the sticky header. */
+section[id] { scroll-margin-top: 72px; }
 h1, h2, h3 { line-height: 1.2; letter-spacing: -.01em; }
 h2 { font-size: 28px; margin: 0 0 18px; }
 h3 { font-size: 17px; margin: 0 0 6px; }
@@ -62,23 +64,6 @@ section.hero { margin-top: 72px; text-align: center; }
 .btn:hover { text-decoration: none; border-color: var(--accent); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .btn.quiet { background: transparent; color: var(--muted); }
-
-/* «Скачать» and its list of systems, drawn like the app's own menus. */
-.get { position: relative; }
-.get-btn { gap: 10px; padding-right: 16px; }
-.get-btn svg { transition: transform .15s; }
-.get-btn[aria-expanded="true"] svg { transform: rotate(180deg); }
-.get-menu { position: absolute; z-index: 10; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: 320px; max-width: calc(100vw - 32px); padding: 6px; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
-.get-menu[hidden] { display: none; }
-.get-menu a { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 7px 10px; border-radius: 7px; color: var(--fg); font-size: 15px; }
-.get-menu a:hover, .get-menu a:focus-visible { text-decoration: none; background: var(--accent); color: var(--accent-fg); outline: none; }
-.get-menu a:hover .faint, .get-menu a:hover small, .get-menu a:focus-visible .faint, .get-menu a:focus-visible small { color: inherit; opacity: .8; }
-.get-menu small { flex: none; color: var(--faint); font-size: 13px; font-variant-numeric: tabular-nums; }
-.get-group { padding: 10px 10px 3px; color: var(--faint); font-size: 12px; font-weight: 600; letter-spacing: .02em; }
-.get-group:first-child { padding-top: 4px; }
-.get-group.yours { color: var(--accent); }
-.yours-note { font-weight: 400; }
-.get-sep { height: 1px; margin: 6px 4px; background: var(--line); }
 .release { margin: 14px 0 44px; }
 
 .window { position: relative; margin: 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--panel); }
@@ -125,9 +110,6 @@ section.numbers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16p
 }
 @media (max-width: 520px) {
   section.wrap { margin: 56px auto; }
-  /* The list under the whole row of buttons, so it stays on a narrow screen. */
-  .cta { position: relative; }
-  .get { position: static; }
   nav a:not([href="#download"]):not([href="#install"]) { display: none; }
   .numbers b { font-size: 24px; }
   .files th { width: auto; white-space: normal; }

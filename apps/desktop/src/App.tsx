@@ -19,7 +19,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { Tab } from "./tabs";
 import { mod, pickFolder, pickImportFile, pickParentFolder } from "./platform";
-import { VarInfo, VarsContext } from "./vars";
+import { loadFakes, VarInfo, VarsContext } from "./vars";
 
 interface Notice {
   text: string;
@@ -133,6 +133,10 @@ export default function App() {
   // with a 300 MB answer gives its memory back. Responses newer than any a tab has had are
   // still on their way to one and stay.
   const shown = tabs.flatMap((t) => (t.response ? [t.response.responseId] : []));
+  useEffect(() => {
+    loadFakes();
+  }, []);
+
   // The answer from another environment lives while the comparison is open.
   if (compare?.right && "responseId" in compare.right) shown.push(compare.right.responseId);
   const seenResponse = useRef(0);

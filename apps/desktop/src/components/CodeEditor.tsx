@@ -34,7 +34,7 @@ import {
   ViewUpdate,
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import { BUILTINS, lookup, shown, useVars, VAR_PATTERN, VarInfo } from "../vars";
+import { builtins, lookup, shown, useVars, VAR_PATTERN, VarInfo } from "../vars";
 
 export type EditorMode = "line" | "json" | "text" | "js";
 
@@ -103,7 +103,7 @@ function varCompletion(ctx: CompletionContext): CompletionResult | null {
   const vars = ctx.state.facet(varsFacet);
   return {
     from,
-    options: [...vars, ...BUILTINS].map((v) => ({
+    options: [...vars, ...builtins()].map((v) => ({
       label: v.name,
       detail: v.source,
       info: v.secret ? shown(v) : v.value,

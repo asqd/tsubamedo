@@ -441,6 +441,7 @@ export const api = {
   curl: (id: string | null, request: Request, env: string | null) => call<string>("curl", { id, request, env }),
   /** The request as code in a language of `languages()`. */
   code: (id: string | null, request: Request, env: string | null, lang: string) => call<string>("code", { id, request, env, lang }),
+  fakeNames: () => call<string[]>("fakeNames"),
   languages: () => call<Language[]>("languages"),
   /** Lets the core drop the bodies of responses up to `seen` that no tab shows. */
   retain: (responses: number[], seen: number) => call<null>("retain", { responses, seen }),

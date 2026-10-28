@@ -1,7 +1,7 @@
 // {{Variables}} for the editors: what is defined in the open environment, where it comes from,
 // and which names a request uses but nobody defined.
 import { createContext, useContext } from "react";
-import { Request } from "./api";
+import { api, Request } from "./api";
 
 export interface VarInfo {
   name: string;
@@ -16,9 +16,24 @@ export const BUILTINS: VarInfo[] = [
   { name: "$uuid", value: "случайный UUID", source: "встроенная", secret: false },
   { name: "$timestamp", value: "секунды с 1970 года", source: "встроенная", secret: false },
   { name: "$timestampMs", value: "миллисекунды с 1970 года", source: "встроенная", secret: false },
+  { name: "$isoTimestamp", value: "время в ISO 8601, UTC", source: "встроенная", secret: false },
   { name: "$randomInt", value: "случайное число 0–999", source: "встроенная", secret: false },
   { name: "$env.", value: "переменная окружения процесса: {{$env.TOKEN}}", source: "встроенная", secret: false },
 ];
+
+/** Postman's made-up values (`$randomEmail`…), named by the core once the window starts. */
+let fakes: VarInfo[] = [];
+export async function loadFakes() {
+  try {
+    const names = await api.fakeNames();
+    fakes = names.map((n) => ({ name: `$${n}`, value: "случайное значение, как в Postman", source: "встроенная", secret: false }));
+  } catch {
+    // Only suggestions.
+  }
+}
+
+/** Every built-in, for suggestions. */
+export const builtins = () => [...BUILTINS, ...fakes];
 
 export const VarsContext = createContext<VarInfo[]>([]);
 export const useVars = () => useContext(VarsContext);
@@ -32,7 +47,7 @@ export function lookup(name: string, vars: VarInfo[]): VarInfo | null {
   if (name.startsWith("$env.") && name.length > 5) {
     return { name, value: "берётся из окружения процесса при отправке", source: "встроенная", secret: false };
   }
-  return BUILTINS.find((b) => b.name === name && !b.name.endsWith(".")) ?? null;
+  return builtins().find((b) => b.name === name && !b.name.endsWith(".")) ?? null;
 }
 
 export function shown(v: VarInfo): string {

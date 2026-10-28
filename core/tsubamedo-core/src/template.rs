@@ -2,7 +2,8 @@
 //!
 //! A variable's value may refer to other variables. Names starting with `$` are built in:
 //! `$uuid`, `$timestamp`, `$timestampMs`, `$isoTimestamp`, `$randomInt` and `$env.NAME` (the process
-//! environment, so CI can pass secrets without files).
+//! environment, so CI can pass secrets without files), and Postman's made-up values
+//! (`$randomEmail`, `$randomFullName`… see [`crate::fake`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -108,12 +109,15 @@ fn dynamic(name: &str) -> Option<String> {
         "timestampMs" => Some(now().as_millis().to_string()),
         "isoTimestamp" => Some(iso(now())),
         "randomInt" => Some(fastrand::u32(0..1000).to_string()),
-        _ => std::env::var(name.strip_prefix("env.")?).ok(),
+        _ => match name.strip_prefix("env.") {
+            Some(var) => std::env::var(var).ok(),
+            None => crate::fake::value(name),
+        },
     }
 }
 
 /// `2025-01-31T12:00:00.000Z`, in UTC.
-fn iso(t: std::time::Duration) -> String {
+pub(crate) fn iso(t: std::time::Duration) -> String {
     let secs = t.as_secs();
     let (days, rest) = (secs / 86_400, secs % 86_400);
     // Days to a civil date, from Howard Hinnant's algorithm.

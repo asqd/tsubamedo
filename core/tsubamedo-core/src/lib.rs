@@ -29,6 +29,7 @@ pub mod cookies;
 pub mod curl;
 pub mod digest;
 pub mod error;
+pub mod fake;
 pub mod git;
 pub mod http;
 pub mod import;

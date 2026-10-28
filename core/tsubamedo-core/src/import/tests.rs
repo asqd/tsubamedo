@@ -130,7 +130,9 @@ fn postman_collection_with_inherited_auth_and_scripts() {
     assert_eq!(serde_json::from_str::<Value>(content).unwrap(), serde_json::json!({"query": "query { me { id } }", "variables": {"a": 1}}));
     assert_eq!(find(&i, "XML").request.body, Body::Text { content: "<a/>".into(), content_type: Some("application/xml".into()) });
     assert_eq!(graphql.auth, Auth::Digest { username: "кот".into(), password: "{{digest_password}}".into() });
-    assert!(warned(&i, "{{$randomFirstName}}"));
+    assert_eq!(parts[0].value, "{{$randomFirstName}}", "у нас есть все переменные Postman");
+    assert!(!warned(&i, "{{$randomFirstName}}"));
+    assert!(warned(&i, "{{$randomMagic}}"));
     assert!(warned(&i, "не заданы переменные: api_key, digest_password"));
 }
 

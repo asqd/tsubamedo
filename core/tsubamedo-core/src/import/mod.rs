@@ -472,12 +472,12 @@ fn map_texts(request: &mut Request, mut f: impl FnMut(&str) -> String) {
 }
 
 /// Built-in variables of Postman and Insomnia that have ours; the rest stay and are named.
-fn builtin(name: &str) -> Option<&'static str> {
+/// Postman's made-up values (`$randomEmail`…) are ours as they are.
+fn builtin(name: &str) -> Option<String> {
     Some(match name {
-        "$guid" | "$randomUUID" | "$uuid" => "{{$uuid}}",
-        "$timestamp" => "{{$timestamp}}",
-        "$isoTimestamp" => "{{$isoTimestamp}}",
-        "$randomInt" => "{{$randomInt}}",
+        "$guid" | "$randomUUID" | "$uuid" => "{{$uuid}}".into(),
+        "$timestamp" | "$isoTimestamp" | "$randomInt" => format!("{{{{{name}}}}}"),
+        _ if crate::fake::value(name.strip_prefix('$')?).is_some() => format!("{{{{{name}}}}}"),
         _ => return None,
     })
 }
@@ -495,7 +495,7 @@ fn map_builtins(text: &str, warnings: &mut Vec<String>) -> String {
         };
         let name = after[..close].trim();
         match builtin(name) {
-            Some(ours) => out.push_str(ours),
+            Some(ours) => out.push_str(&ours),
             None => {
                 if name.starts_with('$') && !name.starts_with("$env.") {
                     warnings.push(format!("встроенной переменной {{{{{name}}}}} у нас нет — она осталась как есть"));

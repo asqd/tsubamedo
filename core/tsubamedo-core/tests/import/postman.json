@@ -166,6 +166,11 @@
                   "key": "file",
                   "type": "file",
                   "src": "/tmp/a.png"
+                },
+                {
+                  "key": "magic",
+                  "value": "{{$randomMagic}}",
+                  "type": "text"
                 }
               ]
             },

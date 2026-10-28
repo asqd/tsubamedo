@@ -394,6 +394,8 @@ impl Converter {
         let arg = |i: usize| args.get(i).map(String::as_str).unwrap_or_default();
         match name {
             "uuid" => "{{$uuid}}".into(),
+            // The faker plugin of Insomnia takes Postman's names.
+            "faker" if crate::fake::value(arg(0)).is_some() => format!("{{{{${}}}}}", arg(0)),
             "now" | "timestamp" => match arg(0) {
                 "millis" | "" if name == "now" => "{{$timestampMs}}".into(),
                 "unix" => "{{$timestamp}}".into(),

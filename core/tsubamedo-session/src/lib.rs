@@ -221,6 +221,7 @@ impl Session {
             "importCurl" => reply(tsubamedo_core::curl::parse(&args::<TextArg>(a)?.text).map_err(|e| e.to_string())?),
             "curl" | "code" => self.code(args(a)?),
             "languages" => reply(tsubamedo_core::codegen::LANGUAGES),
+            "fakeNames" => reply(tsubamedo_core::fake::NAMES),
             "view" => self.view(args(a)?).await,
             "viewLines" => self.view_lines(args(a)?),
             "viewSearch" => self.view_search(args(a)?).await,

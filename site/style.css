@@ -92,10 +92,11 @@ section.numbers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16p
 
 .shots { display: grid; gap: 40px; }
 
-.files { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-.files th, .files td { text-align: left; padding: 14px 18px; border-bottom: 1px solid var(--line); vertical-align: top; }
-.files tr:last-child th, .files tr:last-child td { border-bottom: 0; }
-.files th { width: 170px; font-weight: 600; white-space: nowrap; }
+.files { margin: 0; padding: 0; list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.files li { padding: 14px 18px; border-bottom: 1px solid var(--line); line-height: 1.8; }
+.files li:last-child { border-bottom: 0; }
+.files b { margin-right: 10px; font-weight: 600; white-space: nowrap; }
+.files a { white-space: nowrap; }
 
 .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 20px 0 28px; }
 .steps ol { margin: 0 0 10px; padding-left: 20px; }
@@ -117,10 +118,8 @@ section.numbers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16p
   section.wrap { margin: 56px auto; }
   nav a:not([href="#download"]):not([href="#install"]) { display: none; }
   .numbers b { font-size: 24px; }
-  .files th { width: auto; white-space: normal; }
-  .files th, .files td { display: block; padding: 8px 14px; border-bottom: 0; }
-  .files tr { display: block; border-bottom: 1px solid var(--line); padding: 6px 0; }
-  .files td:empty { display: none; }
+  .files li { padding: 12px 14px; }
+  .files b { display: block; margin: 0 0 2px; }
   .foot { flex-direction: column; }
 }
 /* Room for the language switcher on a phone: «Установка» follows «Скачать» on the page anyway. */

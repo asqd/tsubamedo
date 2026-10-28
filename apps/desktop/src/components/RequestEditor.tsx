@@ -71,7 +71,9 @@ export function RequestEditor({
           className="url"
           value={request.url}
           placeholder="Адрес, {{base_url}}/users или вставьте команду curl"
-          autoFocus
+          // Only an empty address waits for typing. A blinking caret in WebKit on macOS costs
+          // its GPU process ~120 MB while the window is in front, so it is not lit for nothing.
+          autoFocus={!request.url}
           onChange={(url) => set({ url })}
           onSubmit={onSend}
           onPaste={onPasteCurl}

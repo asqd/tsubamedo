@@ -11,7 +11,7 @@ mod targets;
 use serde_json::Value;
 use url::Url;
 
-use crate::model::Body;
+use crate::model::{AwsV4, Body};
 use crate::prepare::Prepared;
 use crate::template::{Vars, render};
 
@@ -79,6 +79,9 @@ pub struct Spec {
     pub insecure: bool,
     pub follow: bool,
     pub digest: Option<(String, String)>,
+    /// Signed by curl itself (`--aws-sigv4`); elsewhere a note, since the signature depends on
+    /// the moment of sending.
+    pub aws: Option<AwsV4>,
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +133,8 @@ impl Spec {
             insecure: prepared.options.verify_tls == Some(false),
             follow: prepared.options.follow_redirects != Some(false),
             digest: prepared.digest.clone(),
+            // A header the user wrote wins, as when sending.
+            aws: prepared.aws.clone().filter(|_| prepared.header("authorization").is_none()),
         }
     }
 
@@ -175,6 +180,9 @@ pub fn generate(language: &str, spec: &Spec) -> Result<String, String> {
     let mut notes = Vec::new();
     if spec.digest.is_some() && !lang.caps.digest {
         notes.push("Digest-авторизация здесь не повторяется: добавьте её средствами библиотеки.");
+    }
+    if spec.aws.is_some() && lang.id != "curl" {
+        notes.push("Подпись AWS Signature v4 здесь не повторяется: она делается в момент отправки — подпишите запрос SDK AWS или библиотекой подписи.");
     }
     if spec.insecure && !lang.caps.insecure {
         notes.push("В запросе выключена проверка сертификата, здесь она включена.");

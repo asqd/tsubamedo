@@ -96,6 +96,22 @@ pub enum Auth {
     /// The token is got and renewed on its own; see [`crate::oauth`].
     #[serde(rename = "oauth2")]
     OAuth2(OAuth2),
+    /// Signed right before sending; see [`crate::sigv4`].
+    #[serde(rename = "awsv4")]
+    AwsV4(AwsV4),
+}
+
+/// AWS Signature Version 4.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AwsV4 {
+    pub access_key: String,
+    pub secret_key: String,
+    /// Temporary credentials (STS, SSO) come with one; empty otherwise.
+    pub session_token: String,
+    pub region: String,
+    /// `s3`, `execute-api`, `lambda`, `es`…
+    pub service: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

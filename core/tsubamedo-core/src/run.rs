@@ -17,7 +17,7 @@ use crate::http::{self, CertSpec, ClientCert, Response, SendOptions};
 use crate::template::render;
 use crate::oauth::{self, Mode, SharedTokens, Tokens};
 use crate::prepare::{Prepared, prepare, scripts_variables, variables};
-use crate::{digest, scripts};
+use crate::{digest, scripts, sigv4};
 use crate::{Error, Request, Result, Vars};
 
 /// How deep requests may pull in other requests.
@@ -382,6 +382,15 @@ impl Runner {
                         prepared.headers.push(("Authorization".into(), got.token.header()));
                     }
                     Err(e) => return Exchange { id, request, sent: None, result: Err(e), checks: Vec::new(), captures: set_by_script, logs },
+                }
+            }
+            // AWS: signed as of now, after everything else is in place; a header the user wrote wins.
+            if let Some(aws) = prepared.aws.clone()
+                && prepared.header("authorization").is_none()
+            {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or_default();
+                if let Err(e) = sigv4::sign(&mut prepared, &aws, now) {
+                    return Exchange { id, request, sent: None, result: Err(Error::Invalid(e)), checks: Vec::new(), captures: set_by_script, logs };
                 }
             }
             let options = self.options.for_request(&prepared);

@@ -28,6 +28,14 @@
 //! # also: auth_url, redirect_uri, audience, username, password,
 //! # pkce = false, client_auth = "body" (client_id and client_secret in the form)
 //!
+//! # or AWS Signature v4, signed right before sending
+//! # [auth]
+//! # type = "awsv4"
+//! # access_key = "{{aws_access_key}}"
+//! # secret_key = "{{aws_secret_key}}"   # session_token for temporary keys
+//! # region = "eu-west-1"
+//! # service = "s3"
+//!
 //! [body]
 //! type = "json"                 # json, text, form, multipart, file
 //! content = '''
@@ -69,7 +77,7 @@ use std::path::{Path, PathBuf};
 
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
-use crate::model::{ApiKeyLocation, Auth, Body, Check, ClientAuth, Grant, OAuth2, Pair, Part, Request, RequestOptions, Scripts};
+use crate::model::{ApiKeyLocation, Auth, AwsV4, Body, Check, ClientAuth, Grant, OAuth2, Pair, Part, Request, RequestOptions, Scripts};
 use crate::{Error, Result};
 
 pub struct RequestFile {
@@ -336,6 +344,13 @@ fn parse_auth(item: Option<&Item>) -> Result<Auth, String> {
             username: field("username")?,
             password: field("password")?,
         }),
+        Some("awsv4") => Auth::AwsV4(AwsV4 {
+            access_key: field("access_key")?,
+            secret_key: field("secret_key")?,
+            session_token: field("session_token")?,
+            region: field("region")?,
+            service: field("service")?,
+        }),
         Some(other) => return Err(format!("auth.type: неизвестный тип «{other}»")),
     })
 }
@@ -557,7 +572,7 @@ fn sync_auth(root: &mut Item, auth: &Auth) {
     }
     const KNOWN: &[&str] = &[
         "type", "username", "password", "token", "key", "value", "in", "grant", "auth_url", "token_url", "client_id", "client_secret",
-        "scope", "audience", "redirect_uri", "pkce", "client_auth",
+        "scope", "audience", "redirect_uri", "pkce", "client_auth", "access_key", "secret_key", "session_token", "region", "service",
     ];
     match auth {
         Auth::None => remove(root, "auth"),
@@ -599,6 +614,18 @@ fn sync_auth(root: &mut Item, auth: &Auth) {
             let section = sync_section(root, "auth", KNOWN, &fields);
             let t = section.as_table_like_mut().expect("table");
             sync_bool(t, "pkce", (code && !o.pkce).then_some(false));
+        }
+        Auth::AwsV4(a) => {
+            let token = Some(a.session_token.as_str()).filter(|t| !t.is_empty());
+            let fields = [
+                ("type", Some("awsv4")),
+                ("access_key", Some(a.access_key.as_str())),
+                ("secret_key", Some(a.secret_key.as_str())),
+                ("session_token", token),
+                ("region", Some(a.region.as_str())),
+                ("service", Some(a.service.as_str())),
+            ];
+            sync_section(root, "auth", KNOWN, &fields);
         }
     }
 }
@@ -848,6 +875,31 @@ content = '''
         f.update(&r);
         let text = f.text();
         assert!(!text.contains("grant =") && text.contains("pkce = false") && text.contains("client_auth = \"body\""), "{text}");
+        assert_eq!(f.request().unwrap(), r);
+    }
+
+    #[test]
+    fn aws_signature_round_trip() {
+        let mut f = sample();
+        let mut r = f.request().unwrap();
+        r.auth = Auth::AwsV4(AwsV4 {
+            access_key: "{{aws_access_key}}".into(),
+            secret_key: "{{aws_secret_key}}".into(),
+            session_token: String::new(),
+            region: "eu-west-1".into(),
+            service: "s3".into(),
+        });
+        f.update(&r);
+        let text = f.text();
+        assert!(
+            text.contains("[auth]\ntype = \"awsv4\"\naccess_key = \"{{aws_access_key}}\"\nsecret_key = \"{{aws_secret_key}}\"\nregion = \"eu-west-1\"\nservice = \"s3\"\n"),
+            "{text}"
+        );
+        assert_eq!(f.request().unwrap(), r);
+        let Auth::AwsV4(a) = &mut r.auth else { unreachable!() };
+        a.session_token = "{{aws_session_token}}".into();
+        f.update(&r);
+        assert!(f.text().contains("session_token = \"{{aws_session_token}}\""));
         assert_eq!(f.request().unwrap(), r);
     }
 

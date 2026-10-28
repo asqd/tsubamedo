@@ -22,7 +22,18 @@ export type Auth =
   | { type: "bearer"; token: string }
   | { type: "digest"; username: string; password: string }
   | { type: "apikey"; key: string; value: string; location: "header" | "query" }
-  | ({ type: "oauth2" } & OAuth2);
+  | ({ type: "oauth2" } & OAuth2)
+  | ({ type: "awsv4" } & AwsV4);
+
+/** AWS Signature v4: the core signs the request right before it goes. */
+export interface AwsV4 {
+  accessKey: string;
+  secretKey: string;
+  /** Temporary keys (STS, SSO) come with one. */
+  sessionToken: string;
+  region: string;
+  service: string;
+}
 
 /** The token is got, kept and renewed by the core. */
 export interface OAuth2 {

@@ -12,7 +12,7 @@ use base64::Engine;
 use serde_json::Value;
 
 use super::{Environment, Format, Imported, Placed, Var, array_at, body_of, join_scripts, map_builtins, map_texts, path_name, split_query, str_at, text};
-use crate::model::{ApiKeyLocation, Auth, Body, ClientAuth, Grant, OAuth2, Pair, Part, Request};
+use crate::model::{ApiKeyLocation, Auth, AwsV4, Body, ClientAuth, Grant, OAuth2, Pair, Part, Request};
 use crate::{Error, Result};
 
 enum Tree<'a> {
@@ -246,6 +246,13 @@ impl Converter {
             }
             "basic" => Auth::Basic { username: str_at(a, "username").into(), password: str_at(a, "password").into() },
             "digest" => Auth::Digest { username: str_at(a, "username").into(), password: str_at(a, "password").into() },
+            "iam" => Auth::AwsV4(AwsV4 {
+                access_key: str_at(a, "accessKeyId").into(),
+                secret_key: str_at(a, "secretAccessKey").into(),
+                session_token: str_at(a, "sessionToken").into(),
+                region: str_at(a, "region").into(),
+                service: str_at(a, "service").into(),
+            }),
             "apikey" => Auth::ApiKey {
                 key: str_at(a, "key").into(),
                 value: str_at(a, "value").into(),

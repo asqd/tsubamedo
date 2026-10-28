@@ -7,7 +7,7 @@
 use serde_json::Value;
 
 use super::{Environment, Format, Imported, Placed, Var, array_at, body_of, join_scripts, map_builtins, map_texts, path_name, split_query, str_at, text};
-use crate::model::{ApiKeyLocation, Auth, Body, ClientAuth, Grant, OAuth2, Pair, Part, Request};
+use crate::model::{ApiKeyLocation, Auth, AwsV4, Body, ClientAuth, Grant, OAuth2, Pair, Part, Request};
 use crate::Result;
 
 #[derive(Clone, Default)]
@@ -191,6 +191,13 @@ impl Converter {
             "bearer" => Auth::Bearer { token: field("token") },
             "basic" => Auth::Basic { username: field("username"), password: field("password") },
             "digest" => Auth::Digest { username: field("username"), password: field("password") },
+            "awsv4" => Auth::AwsV4(AwsV4 {
+                access_key: field("accessKey"),
+                secret_key: field("secretKey"),
+                session_token: field("sessionToken"),
+                region: field("region"),
+                service: field("service"),
+            }),
             "apikey" => Auth::ApiKey {
                 key: field("key"),
                 value: field("value"),

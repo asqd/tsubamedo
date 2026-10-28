@@ -446,6 +446,11 @@ fn map_texts(request: &mut Request, mut f: impl FnMut(&str) -> String) {
                 *field = f(field);
             }
         }
+        Auth::AwsV4(a) => {
+            for field in crate::prepare::aws_fields(a) {
+                *field = f(field);
+            }
+        }
     }
     match &mut request.body {
         Body::Json { content } | Body::Text { content, .. } => *content = f(content),

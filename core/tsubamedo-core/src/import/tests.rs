@@ -334,3 +334,35 @@ fn writes_into_an_open_collection_keeping_its_values() {
     let again = write(&read(&fixture("postman.json")).unwrap(), root).unwrap();
     assert_eq!(again.folder, "Postman API 2");
 }
+
+#[test]
+fn aws_signature_from_postman_and_insomnia() {
+    let dir = tempfile::tempdir().unwrap();
+    let want = Auth::AwsV4(crate::model::AwsV4 {
+        access_key: "AK".into(),
+        secret_key: "{{aws_secret}}".into(),
+        session_token: String::new(),
+        region: "eu-west-1".into(),
+        service: "s3".into(),
+    });
+    let postman = dir.path().join("postman.json");
+    std::fs::write(
+        &postman,
+        r#"{"info": {"name": "AWS", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+            "item": [{"name": "S3", "request": {"method": "GET", "url": "https://b.s3.amazonaws.com/k",
+              "auth": {"type": "awsv4", "awsv4": [{"key": "accessKey", "value": "AK"}, {"key": "secretKey", "value": "{{aws_secret}}"},
+                                                  {"key": "region", "value": "eu-west-1"}, {"key": "service", "value": "s3"}]}}}]}"#,
+    )
+    .unwrap();
+    assert_eq!(find(&read(&postman).unwrap(), "S3").request.auth, want);
+    let insomnia = dir.path().join("insomnia.json");
+    std::fs::write(
+        &insomnia,
+        r#"{"_type": "export", "__export_format": 4, "resources": [
+            {"_id": "wrk_1", "_type": "workspace", "name": "AWS"},
+            {"_id": "req_1", "_type": "request", "parentId": "wrk_1", "name": "S3", "method": "GET", "url": "https://b.s3.amazonaws.com/k",
+             "authentication": {"type": "iam", "accessKeyId": "AK", "secretAccessKey": "{{ _.aws_secret }}", "region": "eu-west-1", "service": "s3"}}]}"#,
+    )
+    .unwrap();
+    assert_eq!(find(&read(&insomnia).unwrap(), "S3").request.auth, want);
+}

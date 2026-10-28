@@ -210,6 +210,7 @@ function AuthEditor({ request, env, sending, onChange }: { request: Request; env
       digest: { type: "digest", username: "", password: "" },
       apikey: { type: "apikey", key: "X-Api-Key", value: "", location: "header" },
       oauth2: freshOAuth(),
+      awsv4: { type: "awsv4", accessKey: "{{aws_access_key}}", secretKey: "{{aws_secret_key}}", sessionToken: "", region: "", service: "" },
     };
     onChange(fresh[type]);
   };
@@ -224,6 +225,7 @@ function AuthEditor({ request, env, sending, onChange }: { request: Request; env
           <option value="digest">Digest: логин и пароль</option>
           <option value="apikey">API key</option>
           <option value="oauth2">OAuth 2.0</option>
+          <option value="awsv4">AWS Signature v4</option>
         </select>
       </label>
       {auth.type === "oauth2" && <OAuthEditor auth={auth} request={request} env={env} sending={sending} onChange={onChange} />}
@@ -245,6 +247,16 @@ function AuthEditor({ request, env, sending, onChange }: { request: Request; env
               <option value="query">в параметры адреса</option>
             </select>
           </label>
+        </>
+      )}
+      {auth.type === "awsv4" && (
+        <>
+          <Field label="Ключ доступа" value={auth.accessKey} onChange={(accessKey) => onChange({ ...auth, accessKey })} placeholder="{{aws_access_key}}" />
+          <Field label="Секретный ключ" value={auth.secretKey} onChange={(secretKey) => onChange({ ...auth, secretKey })} placeholder="{{aws_secret_key}}" />
+          <Field label="Токен сессии" value={auth.sessionToken} onChange={(sessionToken) => onChange({ ...auth, sessionToken })} placeholder="для временных ключей" />
+          <Field label="Регион" value={auth.region} onChange={(region) => onChange({ ...auth, region })} placeholder="eu-west-1" />
+          <Field label="Сервис" value={auth.service} onChange={(service) => onChange({ ...auth, service })} placeholder="s3, execute-api, lambda…" />
+          <div className="hint">Запрос подписывается прямо перед отправкой: метод, путь, параметры, заголовки и тело. Для S3 добавляется хеш тела.</div>
         </>
       )}
       {auth.type === "digest" && (

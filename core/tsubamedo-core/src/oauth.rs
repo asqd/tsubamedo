@@ -262,6 +262,7 @@ async fn request_token(o: &OAuth2, params: &[(&str, &str)], options: &SendOption
         options: RequestOptions::default(),
         oauth: None,
         digest: None,
+        aws: None,
     };
     let response = http::send(&prepared, options).await.map_err(|e| Error::OAuth(format!("сервер токенов: {e}")))?;
     let bytes = response.body.head(1 << 20).map_err(|e| Error::OAuth(format!("ответ сервера токенов: {e}")))?;

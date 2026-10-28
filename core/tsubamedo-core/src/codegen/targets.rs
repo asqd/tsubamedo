@@ -67,6 +67,13 @@ fn curl(s: &Spec) -> String {
     if let Some((u, pw)) = &s.digest {
         p.push(format!("--digest -u {}", sh(&format!("{u}:{pw}"))));
     }
+    if let Some(a) = &s.aws {
+        p.push(format!("--aws-sigv4 {}", sh(&format!("aws:amz:{}:{}", a.region, a.service))));
+        p.push(format!("--user {}", sh(&format!("{}:{}", a.access_key, a.secret_key))));
+        if !a.session_token.is_empty() {
+            p.push(format!("-H {}", sh(&format!("X-Amz-Security-Token: {}", a.session_token))));
+        }
+    }
     if s.insecure {
         p.push("-k".into());
     }

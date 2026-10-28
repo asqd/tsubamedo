@@ -8,6 +8,7 @@
 //! - [`cookies`] — what servers set, sent back like a browser does, a jar per environment.
 //! - [`digest`] — Digest authentication, answered after the server's challenge.
 //! - [`oauth`] — OAuth 2.0 tokens: got in the browser or directly, kept and renewed.
+//! - [`sigv4`] — AWS Signature Version 4, made right before the request goes.
 //! - [`prepare`] — variables substituted, auth and body turned into bytes and headers.
 //! - [`http`] — sending with a time for every phase; big bodies go to a temporary file.
 //! - [`view`] — lines of a body (raw or pretty JSON) for a viewer that never loads it whole.
@@ -37,9 +38,10 @@ pub mod request_file;
 pub mod run;
 pub mod schema;
 pub mod scripts;
+pub mod sigv4;
 pub mod template;
 pub mod view;
 
 pub use error::{Error, Result};
-pub use model::{ApiKeyLocation, Auth, Body, Check, ClientAuth, Grant, OAuth2, Pair, Part, Request, RequestOptions, Scripts};
+pub use model::{ApiKeyLocation, Auth, AwsV4, Body, Check, ClientAuth, Grant, OAuth2, Pair, Part, Request, RequestOptions, Scripts};
 pub use template::Vars;

@@ -8,7 +8,7 @@ use base64::Engine;
 use bytes::Bytes;
 use url::Url;
 
-use crate::model::{ApiKeyLocation, Auth, Body, OAuth2, Pair, Request, RequestOptions};
+use crate::model::{ApiKeyLocation, Auth, AwsV4, Body, OAuth2, Pair, Request, RequestOptions};
 use crate::template::{Renderer, Vars};
 use crate::{Error, Result};
 
@@ -24,6 +24,8 @@ pub struct Prepared {
     pub oauth: Option<OAuth2>,
     /// Digest login and password: the sender answers the server's challenge with them.
     pub digest: Option<(String, String)>,
+    /// AWS keys with variables substituted: the sender signs the request right before it goes.
+    pub aws: Option<AwsV4>,
 }
 
 impl Prepared {
@@ -50,6 +52,7 @@ fn prepare_with(request: &Request, vars: &Vars, base_dir: &Path, read_files: boo
     let mut headers = render_pairs(&mut r, &request.headers);
     let mut oauth = None;
     let mut digest = None;
+    let mut aws = None;
 
     match &request.auth {
         Auth::None => {}
@@ -73,6 +76,13 @@ fn prepare_with(request: &Request, vars: &Vars, base_dir: &Path, read_files: boo
                 *field = r.render(field);
             }
             oauth = Some(o);
+        }
+        Auth::AwsV4(a) => {
+            let mut a = a.clone();
+            for field in aws_fields(&mut a) {
+                *field = r.render(field);
+            }
+            aws = Some(a);
         }
     }
 
@@ -129,7 +139,7 @@ fn prepare_with(request: &Request, vars: &Vars, base_dir: &Path, read_files: boo
     if method.is_empty() || !method.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.!#$%&'*+^`|~".contains(&b)) {
         return Err(Error::Invalid(format!("неверный метод «{method}»")));
     }
-    Ok(Prepared { method, url, headers, body, options: request.options.clone(), oauth, digest })
+    Ok(Prepared { method, url, headers, body, options: request.options.clone(), oauth, digest, aws })
 }
 
 /// Variables a request refers to, with those inside the values of other variables: what it
@@ -158,6 +168,7 @@ pub fn variables(request: &Request, vars: &Vars) -> BTreeSet<String> {
             &o.username,
             &o.password,
         ].map(String::as_str)),
+        Auth::AwsV4(a) => texts.extend([&a.access_key, &a.secret_key, &a.session_token, &a.region, &a.service].map(String::as_str)),
     }
     match &request.body {
         Body::None => {}
@@ -200,6 +211,10 @@ pub fn parse_url(text: &str) -> Result<Url> {
 }
 
 /// The text fields of OAuth 2.0 settings, for substitution.
+pub(crate) fn aws_fields(a: &mut AwsV4) -> [&mut String; 5] {
+    [&mut a.access_key, &mut a.secret_key, &mut a.session_token, &mut a.region, &mut a.service]
+}
+
 pub(crate) fn oauth_fields(o: &mut OAuth2) -> [&mut String; 9] {
     [
         &mut o.auth_url,

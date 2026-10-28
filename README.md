@@ -118,6 +118,23 @@ Cookie, которые ставят серверы, уходят обратно,
 `type = "digest"` с `username` и `password` — Digest (MD5 или SHA-256): запрос уходит без
 авторизации, сервер отвечает 401 с вызовом, и запрос уходит ещё раз с ответом на него.
 
+AWS Signature v4 — для S3, API Gateway, Lambda, OpenSearch и всего, что подписывается так же
+(MinIO, Yandex Object Storage):
+
+```toml
+[auth]
+type = "awsv4"
+access_key = "{{aws_access_key}}"
+secret_key = "{{aws_secret_key}}"    # и session_token для временных ключей
+region = "eu-west-1"
+service = "s3"
+```
+
+Запрос подписывается прямо перед отправкой: метод, путь, параметры, заголовки и тело. Путь и
+параметры уходят в кодировке, которую подписывает AWS, — «Отправлено» показывает их такими, как
+ушли, вместе с `X-Amz-Date` и подписью. S3 получает и хеш тела (`X-Amz-Content-Sha256`);
+написанный вручную `UNSIGNED-PAYLOAD` остаётся. Свой заголовок `Authorization` важнее подписи.
+
 ### Прокси и клиентские сертификаты
 
 Прокси по умолчанию системный: `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, а если их нет — сетевые
@@ -263,7 +280,7 @@ console.log("товаров", order.items.length);
 `tests["…"]` и `postman.setEnvironmentVariable`, `CryptoJS.HmacSHA256`. Нет `pm.sendRequest`
 (у скриптов нет сети) и `pm.cookies`. OAuth 2.0 переносится настройками: из Postman, Insomnia
 и `securitySchemes` OpenAPI (client credentials, вход в браузере, пароль; implicit
-становится входом в браузере с PKCE).
+становится входом в браузере с PKCE), как и Digest и AWS Signature v4.
 
 Импорт в открытую коллекцию ложится в новую папку; переменные, которые в коллекции уже есть,
 не трогаются. Секреты (приватные окружения Insomnia, `secret` в Postman, всё, что называется

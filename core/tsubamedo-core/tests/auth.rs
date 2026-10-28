@@ -18,7 +18,7 @@ use tokio::net::TcpListener;
 use tsubamedo_core::cookies::Jar;
 use tsubamedo_core::http::SendOptions;
 use tsubamedo_core::run::Runner;
-use tsubamedo_core::{Auth, ClientAuth, Grant, OAuth2, Request, Vars};
+use tsubamedo_core::{Auth, AwsV4, Body, ClientAuth, Grant, OAuth2, Request, Vars};
 
 #[derive(Default)]
 struct Server {
@@ -44,6 +44,9 @@ async fn handle(s: Arc<Server>, req: hyper::Request<Incoming>) -> Result<hyper::
     let query: HashMap<String, String> = url::form_urlencoded::parse(req.uri().query().unwrap_or_default().as_bytes()).into_owned().collect();
     let header = |name: &str| req.headers().get(name).map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned()).unwrap_or_default();
     let (cookie, authorization) = (header("cookie"), header("authorization"));
+    if path.starts_with("/aws/") {
+        return Ok(reply(200, &[], &format!("{}\n{authorization}", req.uri())));
+    }
     let body = req.into_body().collect().await.unwrap().to_bytes();
     let form: HashMap<String, String> = url::form_urlencoded::parse(&body).into_owned().collect();
     Ok(match path.as_str() {
@@ -210,4 +213,54 @@ async fn digest_answers_the_challenge() {
     let wrong = Auth::Digest { username: "кот".into(), password: "гав".into() };
     let ex = r.send(None, &get(format!("http://{addr}/digest?x=1"), wrong), Path::new(".")).await.pop().unwrap();
     assert_eq!(ex.result.unwrap().status, 401, "a wrong password is the server's 401, sent once more only");
+}
+
+/// The signature against curl's own (`--aws-sigv4`), on what went: the query as the signer
+/// rewrote it, the body, a session token. The path needs no encoding: curl before 8.8 does not
+/// encode it twice for services other than S3, as AWS asks (the unit tests check that part).
+/// Skipped where curl has no SigV4.
+#[tokio::test(flavor = "multi_thread")]
+async fn aws_signature_matches_curl() {
+    let help = std::process::Command::new("curl").args(["--help", "all"]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    if !help.is_ok_and(|h| h.contains("--aws-sigv4")) {
+        eprintln!("curl без --aws-sigv4, сверка пропущена");
+        return;
+    }
+    let (addr, _) = server().await;
+    let mut r = runner(SendOptions::default());
+    for service in ["s3", "execute-api"] {
+        let aws = AwsV4 {
+            access_key: "AKIDEXAMPLE".into(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".into(),
+            session_token: "tok/1".into(),
+            region: "eu-west-1".into(),
+            service: service.into(),
+        };
+        let request = Request {
+            method: "PUT".into(),
+            url: format!("http://{addr}/aws/a-b_c/d.e~f?z=1&a=x y&a=0"),
+            auth: Auth::AwsV4(aws),
+            body: Body::Text { content: "мяу".into(), content_type: Some("text/plain".into()) },
+            ..Request::default()
+        };
+        let ex = r.send(None, &request, Path::new(".")).await.pop().unwrap();
+        let sent = ex.sent.unwrap();
+        let got = ex.result.unwrap().body.head(1 << 16).unwrap();
+        let (wire, ours) = std::str::from_utf8(&got).unwrap().split_once('\n').unwrap();
+        assert_eq!(wire, "/aws/a-b_c/d.e~f?a=0&a=x%20y&z=1");
+        assert_eq!(ours, sent.header("authorization").unwrap());
+
+        let curl = std::process::Command::new("curl")
+            .args(["-s", "-X", "PUT", "--data-binary", "мяу", "--aws-sigv4", &format!("aws:amz:eu-west-1:{service}")])
+            .args(["--user", "AKIDEXAMPLE:wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"])
+            .args(["-H", "Content-Type: text/plain", "-H", "X-Amz-Security-Token: tok/1"])
+            .args(["-H", &format!("X-Amz-Date: {}", sent.header("x-amz-date").unwrap())])
+            .args(sent.header("x-amz-content-sha256").map(|h| ["-H".to_string(), format!("X-Amz-Content-Sha256: {h}")]).into_iter().flatten())
+            .arg(sent.url.as_str())
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&curl.stdout);
+        let theirs = out.split_once('\n').map(|(_, a)| a).unwrap_or_default();
+        assert_eq!(ours, theirs, "{service}");
+    }
 }

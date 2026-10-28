@@ -3,7 +3,7 @@
 
 use base64::Engine;
 
-use crate::model::{Auth, Body, Pair, Part, Request};
+use crate::model::{Auth, AwsV4, Body, Pair, Part, Request};
 use crate::prepare::Prepared;
 use crate::template::Vars;
 use crate::{Error, Result};
@@ -75,6 +75,8 @@ struct Command {
     json: bool,
     form: Vec<Part>,
     user: Option<String>,
+    /// `--aws-sigv4 aws:amz:<region>:<service>`: the user is the AWS keys.
+    aws: Option<String>,
     bearer: Option<String>,
     get: bool,
     head: bool,
@@ -145,6 +147,7 @@ impl Command {
                 });
             }
             "user" => self.user = Some(value),
+            "aws-sigv4" => self.aws = Some(value),
             "oauth2-bearer" => self.bearer = Some(value),
             "cookie" if value.contains('=') => self.headers.push(("Cookie".into(), value)),
             "user-agent" => self.headers.push(("User-Agent".into(), value)),
@@ -186,7 +189,21 @@ impl Command {
         }
         if let Some(user) = &self.user {
             let (username, password) = user.split_once(':').unwrap_or((user, ""));
-            request.auth = Auth::Basic { username: username.into(), password: password.into() };
+            request.auth = match &self.aws {
+                Some(aws) => {
+                    let mut parts = aws.split(':').skip(2);
+                    let session_token = header(&self.headers, "x-amz-security-token").unwrap_or_default();
+                    drop_header(&mut self.headers, "x-amz-security-token");
+                    Auth::AwsV4(AwsV4 {
+                        access_key: username.into(),
+                        secret_key: password.into(),
+                        session_token,
+                        region: parts.next().unwrap_or_default().into(),
+                        service: parts.next().unwrap_or_default().into(),
+                    })
+                }
+                None => Auth::Basic { username: username.into(), password: password.into() },
+            };
         }
         if let Some(token) = &self.bearer {
             request.auth = Auth::Bearer { token: token.clone() };
@@ -394,6 +411,22 @@ mod tests {
         assert_eq!(r.headers, vec![Pair::new("accept", "application/json")]);
         assert_eq!(r.auth, Auth::Bearer { token: "abc.def".into() });
         assert_eq!(r.body, Body::Json { content: r#"{"name":"Кот 'Матроскин'","n":1}"#.into() });
+    }
+
+    #[test]
+    fn aws_signature_goes_both_ways() {
+        let aws = AwsV4 {
+            access_key: "AK".into(),
+            secret_key: "{{aws_secret}}".into(),
+            session_token: "tok".into(),
+            region: "eu-west-1".into(),
+            service: "s3".into(),
+        };
+        let r = Request { url: "https://b.s3.amazonaws.com/k".into(), auth: Auth::AwsV4(aws.clone()), ..Request::default() };
+        let vars: Vars = [("aws_secret".to_string(), "sec".to_string())].into();
+        let command = to_curl(&prepare(&r, &vars, std::path::Path::new(".")).unwrap(), &r.body, &vars);
+        assert!(command.contains("--aws-sigv4 'aws:amz:eu-west-1:s3' \\\n  --user 'AK:sec' \\\n  -H 'X-Amz-Security-Token: tok'"), "{command}");
+        assert_eq!(parse(&command).unwrap().auth, Auth::AwsV4(AwsV4 { secret_key: "sec".into(), ..aws }));
     }
 
     #[test]

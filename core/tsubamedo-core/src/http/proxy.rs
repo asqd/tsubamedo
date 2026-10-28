@@ -178,7 +178,9 @@ fn from_os() -> SystemProxy {
     SystemProxy::default()
 }
 
-/// `scutil --proxy`: the settings of the network in use, as macOS applies them.
+/// `scutil --proxy`: the settings of the network in use, as macOS applies them. Elsewhere only
+/// its tests use it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn parse_scutil(text: &str) -> SystemProxy {
     let mut fields = std::collections::HashMap::new();
     let mut bypass = Vec::new();

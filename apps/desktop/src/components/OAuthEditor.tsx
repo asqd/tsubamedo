@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, OAuth2, Request, TokenInfo } from "../api";
 import { lang, t } from "../i18n";
 import { CodeEditor } from "./CodeEditor";
+import { Picker } from "./Picker";
 
 type Settings = { type: "oauth2" } & OAuth2;
 
@@ -84,11 +85,16 @@ export function OAuthEditor({
     <>
       <label>
         <span>{t("Как получить токен", "How to get the token")}</span>
-        <select value={auth.grant} onChange={(e) => set({ grant: e.target.value as OAuth2["grant"] })}>
-          <option value="authorization_code">{t("Вход в браузере (authorization code)", "Sign-in in the browser (authorization code)")}</option>
-          <option value="client_credentials">Client credentials</option>
-          <option value="password">{t("Логин и пароль (password)", "Username and password (password)")}</option>
-        </select>
+        <Picker
+          label={t("Как получить токен", "How to get the token")}
+          options={[
+            { value: "authorization_code", label: t("Вход в браузере (authorization code)", "Sign-in in the browser (authorization code)") },
+            { value: "client_credentials", label: "Client credentials" },
+            { value: "password", label: t("Логин и пароль (password)", "Username and password (password)") },
+          ]}
+          value={auth.grant}
+          onChange={(grant) => set({ grant: grant as OAuth2["grant"] })}
+        />
       </label>
       {code && <Field label={t("Адрес входа", "Authorization URL")} value={auth.authUrl} onChange={(authUrl) => set({ authUrl })} placeholder="https://id.example.com/authorize" />}
       <Field label={t("Адрес токена", "Token URL")} value={auth.tokenUrl} onChange={(tokenUrl) => set({ tokenUrl })} placeholder="https://id.example.com/oauth/token" />
@@ -120,19 +126,29 @@ export function OAuthEditor({
               />
               <label>
                 <span>PKCE</span>
-                <select value={auth.pkce ? "on" : "off"} onChange={(e) => set({ pkce: e.target.value === "on" })}>
-                  <option value="on">{t("да, S256", "yes, S256")}</option>
-                  <option value="off">{t("нет", "no")}</option>
-                </select>
+                <Picker
+                  label="PKCE"
+                  options={[
+                    { value: "on", label: t("да, S256", "yes, S256") },
+                    { value: "off", label: t("нет", "no") },
+                  ]}
+                  value={auth.pkce ? "on" : "off"}
+                  onChange={(v) => set({ pkce: v === "on" })}
+                />
               </label>
             </>
           )}
           <label>
             <span>{t("Client ID и секрет", "Client ID and secret")}</span>
-            <select value={auth.clientAuth} onChange={(e) => set({ clientAuth: e.target.value as OAuth2["clientAuth"] })}>
-              <option value="basic">{t("в заголовке Authorization: Basic", "in the Authorization: Basic header")}</option>
-              <option value="body">{t("в теле запроса токена", "in the body of the token request")}</option>
-            </select>
+            <Picker
+              label={t("Client ID и секрет", "Client ID and secret")}
+              options={[
+                { value: "basic", label: t("в заголовке Authorization: Basic", "in the Authorization: Basic header") },
+                { value: "body", label: t("в теле запроса токена", "in the body of the token request") },
+              ]}
+              value={auth.clientAuth}
+              onChange={(clientAuth) => set({ clientAuth: clientAuth as OAuth2["clientAuth"] })}
+            />
           </label>
         </div>
       </details>

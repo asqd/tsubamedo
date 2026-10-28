@@ -354,7 +354,7 @@ button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 .run-row.waiting { color: var(--muted); }
 .run-row.first { padding-top: 3px; padding-bottom: 3px; opacity: .85; }
 .run-setting { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
-.run-setting select { font-size: 12px; padding: 1px 2px; }
+.run-setting .picker-button { font-size: 12px; padding: 1px 4px 1px 6px; gap: 4px; }
 .run-bar { display: flex; height: 3px; margin-top: 8px; border-radius: 2px; background: var(--sunken); overflow: hidden; }
 .run-bar .good { background: var(--ok); transition: width .2s; }
 .run-bar .bad { background: var(--bad); transition: width .2s; }
@@ -392,6 +392,10 @@ button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 .picker-menu .menu-item:hover:not(:disabled) { background: transparent; color: inherit; }
 .picker-menu .menu-item.hover, .picker-menu .menu-item.hover:hover { background: var(--accent); color: var(--accent-fg); }
 .language-picker .picker-button { min-width: 190px; max-width: 280px; }
+.form .picker { justify-self: start; max-width: 100%; min-width: 0; }
+.form .picker-button { min-width: min(160px, 100%); max-width: 100%; }
+.pairs .kind .picker, .pairs .kind .picker-button { width: 100%; }
+.pairs .kind .picker-button { padding: 3px 6px 3px 8px; }
 .env-picker .picker-button { min-width: 120px; max-width: 220px; padding: 2px 6px 2px 8px; }
 .code-view { margin: 4px 0 0; padding: 10px 12px; max-height: 60vh; overflow: auto; background: var(--sunken); border-radius: 6px; font-size: 12px; line-height: 1.5; white-space: pre; user-select: text; }
 .modal-actions .faint { margin-right: auto; align-self: center; }

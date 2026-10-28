@@ -21,6 +21,7 @@ export function Picker({
   onChange,
   label,
   title,
+  disabled = false,
   className = "",
 }: {
   options: PickerOption[];
@@ -29,6 +30,7 @@ export function Picker({
   /** For screen readers: what is chosen. */
   label: string;
   title?: string;
+  disabled?: boolean;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -38,6 +40,10 @@ export function Picker({
   const menu = useRef<HTMLDivElement>(null);
   const at = Math.max(0, options.findIndex((o) => o.value === value));
   const current = options[at];
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   useEffect(() => {
     if (!open) return;
@@ -115,7 +121,7 @@ export function Picker({
         aria-expanded={open}
         aria-label={label}
         title={title}
-        disabled={options.length === 0}
+        disabled={disabled || options.length === 0}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onKeyDown}
       >

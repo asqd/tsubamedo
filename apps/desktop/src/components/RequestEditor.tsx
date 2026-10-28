@@ -9,6 +9,7 @@ import { CodeEditor } from "./CodeEditor";
 import { MethodPicker } from "./MethodPicker";
 import { Field, freshOAuth, OAuthEditor } from "./OAuthEditor";
 import { PairsTable } from "./PairsTable";
+import { Picker } from "./Picker";
 
 
 type Tab = "query" | "headers" | "auth" | "body" | "checks" | "scripts" | "options";
@@ -123,15 +124,16 @@ export function RequestEditor({
           <div className="form">
             <label>
               <span>{t("Перенаправления", "Redirects")}</span>
-              <TriState value={request.options.followRedirects} yes={t("переходить", "follow")} no={t("не переходить", "don't follow")} onChange={(followRedirects) => set({ options: { ...request.options, followRedirects } })} />
+              <TriState label={t("Перенаправления", "Redirects")} value={request.options.followRedirects} yes={t("переходить", "follow")} no={t("не переходить", "don't follow")} onChange={(followRedirects) => set({ options: { ...request.options, followRedirects } })} />
             </label>
             <label>
               <span>{t("Проверка сертификата", "Certificate verification")}</span>
-              <TriState value={request.options.verifyTls} yes={t("проверять", "verify")} no={t("не проверять", "don't verify")} onChange={(verifyTls) => set({ options: { ...request.options, verifyTls } })} />
+              <TriState label={t("Проверка сертификата", "Certificate verification")} value={request.options.verifyTls} yes={t("проверять", "verify")} no={t("не проверять", "don't verify")} onChange={(verifyTls) => set({ options: { ...request.options, verifyTls } })} />
             </label>
             <label>
               <span>{t("Cookie", "Cookies")}</span>
               <TriState
+                label={t("Cookie", "Cookies")}
                 value={request.options.cookies ?? null}
                 yes={t("отправлять и запоминать", "send and remember")}
                 no={t("без cookie", "no cookies")}
@@ -205,13 +207,18 @@ function ScriptsEditor({ scripts, onChange, onSubmit }: { scripts: Request["scri
   );
 }
 
-function TriState({ value, yes, no, onChange }: { value: boolean | null; yes: string; no: string; onChange: (v: boolean | null) => void }) {
+function TriState({ label, value, yes, no, onChange }: { label: string; value: boolean | null; yes: string; no: string; onChange: (v: boolean | null) => void }) {
   return (
-    <select value={value == null ? "" : value ? "yes" : "no"} onChange={(e) => onChange(e.target.value === "" ? null : e.target.value === "yes")}>
-      <option value="">{t("как обычно", "default")}</option>
-      <option value="yes">{yes}</option>
-      <option value="no">{no}</option>
-    </select>
+    <Picker
+      label={label}
+      options={[
+        { value: "", label: t("как обычно", "default"), faint: true },
+        { value: "yes", label: yes },
+        { value: "no", label: no },
+      ]}
+      value={value == null ? "" : value ? "yes" : "no"}
+      onChange={(v) => onChange(v === "" ? null : v === "yes")}
+    />
   );
 }
 
@@ -233,15 +240,20 @@ function AuthEditor({ request, env, sending, onChange }: { request: Request; env
     <div className="form">
       <label>
         <span>{t("Тип", "Type")}</span>
-        <select value={auth.type} onChange={(e) => switchTo(e.target.value as Auth["type"])}>
-          <option value="none">{t("Нет", "None")}</option>
-          <option value="bearer">{t("Bearer-токен", "Bearer token")}</option>
-          <option value="basic">{t("Basic: логин и пароль", "Basic: username and password")}</option>
-          <option value="digest">{t("Digest: логин и пароль", "Digest: username and password")}</option>
-          <option value="apikey">API key</option>
-          <option value="oauth2">OAuth 2.0</option>
-          <option value="awsv4">AWS Signature v4</option>
-        </select>
+        <Picker
+          label={t("Тип авторизации", "Auth type")}
+          options={[
+            { value: "none", label: t("Нет", "None"), faint: true },
+            { value: "bearer", label: t("Bearer-токен", "Bearer token") },
+            { value: "basic", label: t("Basic: логин и пароль", "Basic: username and password") },
+            { value: "digest", label: t("Digest: логин и пароль", "Digest: username and password") },
+            { value: "apikey", label: "API key" },
+            { value: "oauth2", label: "OAuth 2.0" },
+            { value: "awsv4", label: "AWS Signature v4" },
+          ]}
+          value={auth.type}
+          onChange={(type) => switchTo(type as Auth["type"])}
+        />
       </label>
       {auth.type === "oauth2" && <OAuthEditor auth={auth} request={request} env={env} sending={sending} onChange={onChange} />}
       {auth.type === "bearer" && <Field label={t("Токен", "Token")} value={auth.token} onChange={(token) => onChange({ ...auth, token })} placeholder="{{token}}" />}
@@ -257,10 +269,15 @@ function AuthEditor({ request, env, sending, onChange }: { request: Request; env
           <Field label={t("Значение", "Value")} value={auth.value} onChange={(value) => onChange({ ...auth, value })} placeholder="{{api_key}}" />
           <label>
             <span>{t("Куда", "Add to")}</span>
-            <select value={auth.location} onChange={(e) => onChange({ ...auth, location: e.target.value as "header" | "query" })}>
-              <option value="header">{t("в заголовок", "header")}</option>
-              <option value="query">{t("в параметры адреса", "query params")}</option>
-            </select>
+            <Picker
+              label={t("Куда", "Add to")}
+              options={[
+                { value: "header", label: t("в заголовок", "header") },
+                { value: "query", label: t("в параметры адреса", "query params") },
+              ]}
+              value={auth.location}
+              onChange={(location) => onChange({ ...auth, location: location as "header" | "query" })}
+            />
           </label>
         </>
       )}
@@ -386,10 +403,15 @@ function PartsTable({ parts, onChange }: { parts: Part[]; onChange: (p: Part[]) 
                 <input className="mono" value={p.name} placeholder={t("Поле", "Field")} spellCheck={false} onChange={(e) => set(i, { name: e.target.value })} />
               </td>
               <td className="kind">
-                <select value={p.isFile ? "file" : "text"} onChange={(e) => set(i, { isFile: e.target.value === "file" })}>
-                  <option value="text">{t("текст", "text")}</option>
-                  <option value="file">{t("файл", "file")}</option>
-                </select>
+                <Picker
+                  label={t("Тип поля", "Field type")}
+                  options={[
+                    { value: "text", label: t("текст", "text") },
+                    { value: "file", label: t("файл", "file") },
+                  ]}
+                  value={p.isFile ? "file" : "text"}
+                  onChange={(kind) => set(i, { isFile: kind === "file" })}
+                />
               </td>
               <td>
                 <CodeEditor mode="line" className="field" value={p.value} placeholder={p.isFile ? t("путь к файлу", "file path") : t("Значение", "Value")} onChange={(value) => set(i, { value })} />

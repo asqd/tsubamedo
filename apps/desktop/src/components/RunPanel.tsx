@@ -4,6 +4,7 @@
 import { RunResult, RunStep } from "../api";
 import { ms, size, statusTone } from "../format";
 import { t } from "../i18n";
+import { Picker } from "./Picker";
 
 export interface RunState {
   /** Empty for the whole collection. */
@@ -93,23 +94,23 @@ export function RunPanel({
           )}
         >
           {t("одновременно", "at once")}
-          <select value={settings.parallel} disabled={running} onChange={(e) => onSettings({ ...settings, parallel: Number(e.target.value) })}>
-            {[1, 2, 4, 8].map((n) => (
-              <option key={n} value={n}>
-                {n === 1 ? t("по одному", "one by one") : n}
-              </option>
-            ))}
-          </select>
+          <Picker
+            label={t("Одновременно", "At once")}
+            disabled={running}
+            options={[1, 2, 4, 8].map((n) => ({ value: String(n), label: n === 1 ? t("по одному", "one by one") : String(n) }))}
+            value={String(settings.parallel)}
+            onChange={(n) => onSettings({ ...settings, parallel: Number(n) })}
+          />
         </label>
         <label className="run-setting small muted" title={t("Сколько раз отправить упавший запрос ещё раз, с паузой", "How many times to resend a failed request, with a pause")}>
           {t("повторы", "retries")}
-          <select value={settings.retries} disabled={running} onChange={(e) => onSettings({ ...settings, retries: Number(e.target.value) })}>
-            {[0, 1, 2, 3].map((n) => (
-              <option key={n} value={n}>
-                {n === 0 ? t("нет", "none") : n}
-              </option>
-            ))}
-          </select>
+          <Picker
+            label={t("Повторы", "Retries")}
+            disabled={running}
+            options={[0, 1, 2, 3].map((n) => ({ value: String(n), label: n === 0 ? t("нет", "none") : String(n) }))}
+            value={String(settings.retries)}
+            onChange={(n) => onSettings({ ...settings, retries: Number(n) })}
+          />
         </label>
         {running ? (
           <button onClick={onCancel}>{t("Остановить", "Stop")}</button>

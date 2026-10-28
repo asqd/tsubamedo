@@ -238,7 +238,10 @@ Postman. У нас — точечное сохранение файлов без
 - [x] Страница загрузки (`site/`, GitHub Pages): что умеет, цифры, снимки в светлой и тёмной
       теме (`make screens`: демо-коллекция в WebKit), файлы для всех систем — ссылки, версия и
       размеры из GitHub API, — первый запуск без подписи на macOS, Windows и Linux, CLI через curl.
-- [x] GitHub Actions: `ci.yml` (тесты, clippy, типы на macOS и Linux, сборка на Windows),
-      `release.yml` (macOS, Windows x64, Linux x86_64 и ARM64; на тег — черновик выпуска),
-      `pages.yml`. **Ещё ни разу не запускались**: у проекта пока нет репозитория на GitHub.
-- [ ] Первый выпуск: репозиторий, Pages, тег v0.1.0, проверка сборок Windows и Linux.
+- [x] GitHub Actions, расходуются экономно: `ci.yml` (на пуш в main и PR, кроме документации,
+      сайта и дизайна: тесты, clippy и типы на Linux, сборка CLI на Windows; macOS — `make
+      check`), `release.yml` (macOS, Windows x64, Linux x86_64 и ARM64; только тег — черновик
+      выпуска — или ручной запуск), `pages.yml` (на изменение `site/`).
+- [x] Репозиторий github.com/asqd/tsubamedo, страница asqd.github.io/tsubamedo. CI зелёный:
+      на Linux 100 тестов, CLI и ядро собираются на Windows.
+- [ ] Первый выпуск: тег v0.1.0, проверка установщиков Windows и Linux.

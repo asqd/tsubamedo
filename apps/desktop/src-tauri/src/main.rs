@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use tauri::{Manager, State};
-use tsubamedo_core::tr_static;
 use tsubamedo_session::Session;
 
 #[tauri::command]
@@ -28,6 +27,7 @@ async fn call(app: tauri::AppHandle, session: State<'_, Arc<Session>>, method: S
 #[cfg(target_os = "macos")]
 fn menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
     use tauri::menu::{Menu, PredefinedMenuItem as Item, Submenu};
+    use tsubamedo_core::tr_static;
     Menu::with_items(
         app,
         &[

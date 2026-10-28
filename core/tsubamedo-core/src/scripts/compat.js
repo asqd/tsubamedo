@@ -11,7 +11,7 @@
     }
   };
   const fail = (what) => {
-    throw new Error(`${what} в TsubameDo нет: у скриптов нет сети, файлов и cookie`);
+    throw new Error(`${what} в TsubameDo нет: у скриптов нет сети и файлов`);
   };
 
   // ---- variables: every Postman scope is our one set ----
@@ -307,6 +307,7 @@
       headers: listOf(res.headers),
       json: () => res.json(),
       text: () => res.text(),
+      cookies: res.cookies,
       to: to(false),
     });
   }
@@ -326,9 +327,7 @@
     expect: chai,
     info: Object.freeze({ eventName: res ? "test" : "prerequest", iteration: 0, iterationCount: 1 }),
     sendRequest: () => fail("pm.sendRequest"),
-    get cookies() {
-      return fail("pm.cookies");
-    },
+    cookies: Object.freeze({ ...globalThis.cookies, jar: () => fail("pm.cookies.jar()") }),
     visualizer: Object.freeze({ set() {} }),
     execution: Object.freeze({ setNextRequest() {}, skipRequest: () => fail("pm.execution.skipRequest") }),
     require: (name) => modules(name),

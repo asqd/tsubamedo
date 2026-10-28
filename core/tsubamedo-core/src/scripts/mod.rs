@@ -17,7 +17,9 @@
 //! ```
 //!
 //! The sandbox has no files, network or timers: only the language, `vars`, `request`,
-//! `response`, `test`/`expect`, `console`, `crypto` and `btoa`/`atob`. A script gets
+//! `response`, `cookies` (those of the environment's jar that go to the request's address;
+//! after the response, with what it set), `test`/`expect`, `console`, `crypto` and
+//! `btoa`/`atob`. A script gets
 //! [`TIME_LIMIT`] and [`MEMORY_LIMIT`].
 //!
 //! Scripts imported from Postman and Insomnia find their `pm`, `insomnia`, `postman`,
@@ -32,6 +34,7 @@ use rquickjs::{CaughtError, Context, Ctx, Exception, Function, Runtime};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::cookies::Cookie;
 use crate::http::Response;
 use crate::model::{Body, Pair, Request};
 use crate::prepare::Prepared;
@@ -87,7 +90,7 @@ pub struct Outcome {
 }
 
 /// Runs the script before a request; returns the request as the script left it.
-pub fn before(script: &str, request: &Request, vars: &Vars) -> (Request, Outcome) {
+pub fn before(script: &str, request: &Request, vars: &Vars, cookies: &[Cookie]) -> (Request, Outcome) {
     let body = match &request.body {
         Body::Json { content } | Body::Text { content, .. } => Some(content.clone()),
         _ => None,
@@ -99,7 +102,7 @@ pub fn before(script: &str, request: &Request, vars: &Vars) -> (Request, Outcome
         query: request.query.clone(),
         body,
     };
-    let (changed, outcome) = run(script, json!({ "vars": vars, "request": input, "response": null }));
+    let (changed, outcome) = run(script, json!({ "vars": vars, "request": input, "response": null, "cookies": cookies }));
     let mut request = request.clone();
     if let Some(r) = changed {
         request.method = r.method;
@@ -114,7 +117,7 @@ pub fn before(script: &str, request: &Request, vars: &Vars) -> (Request, Outcome
 }
 
 /// Runs the script after a response.
-pub fn after(script: &str, sent: &Prepared, response: &Response, vars: &Vars) -> Outcome {
+pub fn after(script: &str, sent: &Prepared, response: &Response, vars: &Vars, cookies: &[Cookie]) -> Outcome {
     let request = ScriptRequest {
         method: sent.method.clone(),
         url: sent.url.to_string(),
@@ -140,7 +143,7 @@ pub fn after(script: &str, sent: &Prepared, response: &Response, vars: &Vars) ->
         "body": body,
         "bodyError": body_error,
     });
-    run(script, json!({ "vars": vars, "request": request, "response": response })).1
+    run(script, json!({ "vars": vars, "request": request, "response": response, "cookies": cookies })).1
 }
 
 /// Where a script keeps variables: ours, and the scopes of Postman and Insomnia, which are

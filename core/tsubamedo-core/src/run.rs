@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use crate::checks::{self, Answer, CheckResult, Captured};
 use crate::collection::{Collection, Entry};
+use crate::cookies::Cookie;
 use crate::http::{self, CertSpec, ClientCert, Response, SendOptions};
 use crate::template::render;
 use crate::oauth::{self, Mode, SharedTokens, Tokens};
@@ -339,7 +340,10 @@ impl Runner {
                 let scripted = if request.scripts.before.trim().is_empty() {
                     request.clone()
                 } else {
-                    let (scripted, out) = scripts::before(&request.scripts.before, &request, &self.vars());
+                    let vars = self.vars();
+                    let url = render(&request.url, &vars).unwrap_or_default();
+                    let cookies = self.cookies_for(&url, &request);
+                    let (scripted, out) = scripts::before(&request.scripts.before, &request, &vars, &cookies);
                     logs.extend(out.logs);
                     for (name, value) in out.vars {
                         self.captured.insert(name.clone(), value.clone());
@@ -467,6 +471,17 @@ impl Runner {
         sent_any
     }
 
+    /// What the jar sends to `url`, for scripts; nothing when the request goes without cookies.
+    fn cookies_for(&self, url: &str, request: &Request) -> Vec<Cookie> {
+        if request.options.cookies == Some(false) {
+            return Vec::new();
+        }
+        match (&self.options.cookies, url.parse::<url::Url>()) {
+            (Some(jar), Ok(url)) => jar.lock().unwrap().for_url(&url),
+            _ => Vec::new(),
+        }
+    }
+
     /// Captures first, then the script after, then the checks, so each can use what the one
     /// before it set.
     fn read(&mut self, request: &Request, sent: &Prepared, response: &Response, dir: &Path, logs: &mut Vec<String>) -> (Vec<CheckResult>, Vec<Captured>) {
@@ -479,7 +494,8 @@ impl Runner {
         }
         let mut results = Vec::new();
         if !request.scripts.after.trim().is_empty() {
-            let out = scripts::after(&request.scripts.after, sent, response, &self.vars());
+            let cookies = self.cookies_for(sent.url.as_str(), request);
+            let out = scripts::after(&request.scripts.after, sent, response, &self.vars(), &cookies);
             logs.extend(out.logs);
             for (name, value) in out.vars {
                 self.captured.insert(name.clone(), value.clone());

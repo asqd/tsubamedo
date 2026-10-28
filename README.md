@@ -267,7 +267,11 @@ console.log("товаров", order.items.length);
 - `request` — `method`, `url`, `headers` и `query` (`get`, `set`, `has`, `remove`, `all`), `body`
   (текст JSON или просто текст; можно присвоить объект). До запроса — как в файле, с
   `{{переменными}}`, и его можно менять; после — то, что ушло, только для чтения.
-- `response` (после) — `status`, `statusText`, `time`, `size`, `headers`, `text()`, `json()`.
+- `response` (после) — `status`, `statusText`, `time`, `size`, `headers`, `text()`, `json()`,
+  `cookies` — что поставил этот ответ.
+- `cookies` — cookie окружения, которые уходят на адрес запроса (после ответа — вместе с
+  поставленными им): `get(имя)`, `has(имя)`, `one(имя)` с доменом, путём и сроком,
+  `toObject()`, `all()`.
 - `test(имя, () => …)` и `expect(x)`: `toBe`, `toEqual`, `toContain`, `toMatch`, `toHaveLength`,
   `toHaveProperty`, `toBeGreaterThan`, `toBeLessThan`, `toBeTruthy`, `toBeDefined`… и `.not`.
   Тесты стоят рядом с проверками, в отчёте JUnit тоже.
@@ -296,8 +300,9 @@ console.log("товаров", order.items.length);
 
 Скрипты Postman и Insomnia работают как есть: `pm.environment.set`, `pm.test`,
 `pm.expect(x).to.eql(…)`, `pm.response.to.have.status(201)`, `insomnia.*`, старые
-`tests["…"]` и `postman.setEnvironmentVariable`, `CryptoJS.HmacSHA256`. Нет `pm.sendRequest`
-(у скриптов нет сети) и `pm.cookies`. OAuth 2.0 переносится настройками: из Postman, Insomnia
+`tests["…"]` и `postman.setEnvironmentVariable`, `CryptoJS.HmacSHA256`, `pm.cookies.get(…)`,
+`pm.response.cookies`, `pm.variables.replaceIn("{{$randomEmail}}")`. Нет `pm.sendRequest` (у
+скриптов нет сети) и `pm.cookies.jar()`. OAuth 2.0 переносится настройками: из Postman, Insomnia
 и `securitySchemes` OpenAPI (client credentials, вход в браузере, пароль; implicit
 становится входом в браузере с PKCE), как и Digest и AWS Signature v4.
 

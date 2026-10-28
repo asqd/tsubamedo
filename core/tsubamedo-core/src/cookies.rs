@@ -136,8 +136,18 @@ impl Jar {
         }
     }
 
+    /// The cookies a request to `url` carries, in the order they go: for scripts.
+    pub fn for_url(&mut self, url: &Url) -> Vec<Cookie> {
+        self.for_url_at(url, now_ms())
+    }
+
     fn header_at(&mut self, url: &Url, now: u64) -> Option<String> {
-        let host = url.host()?;
+        let matching = self.for_url_at(url, now);
+        (!matching.is_empty()).then(|| matching.iter().map(|c| format!("{}={}", c.name, c.value)).collect::<Vec<_>>().join("; "))
+    }
+
+    fn for_url_at(&mut self, url: &Url, now: u64) -> Vec<Cookie> {
+        let Some(host) = url.host() else { return Vec::new() };
         let host_name = host_name(&host);
         let now_s = (now / 1000) as i64;
         let expired = self.cookies.len();
@@ -146,7 +156,7 @@ impl Jar {
         // Browsers treat this machine as secure even over plain HTTP.
         let secure = url.scheme() == "https" || is_loopback(&host);
         let path = url.path();
-        let mut matching: Vec<&Cookie> = self
+        let mut matching: Vec<Cookie> = self
             .cookies
             .iter()
             .filter(|c| {
@@ -157,13 +167,11 @@ impl Jar {
                 };
                 domain_ok && path_matches(path, &c.path) && (secure || !c.secure)
             })
+            .cloned()
             .collect();
-        if matching.is_empty() {
-            return None;
-        }
         // Longer paths first, then the older: what servers expect when names repeat.
         matching.sort_by(|a, b| b.path.len().cmp(&a.path.len()).then(a.created.cmp(&b.created)));
-        Some(matching.iter().map(|c| format!("{}={}", c.name, c.value)).collect::<Vec<_>>().join("; "))
+        matching
     }
 }
 

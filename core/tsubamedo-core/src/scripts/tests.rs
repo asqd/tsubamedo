@@ -49,7 +49,7 @@ fn before_changes_the_request_and_sets_variables() {
         console.log("тело", body, { n: 1 });
     "#;
     let v = vars(&[("base", "http://api.test"), ("tour", "Сочи"), ("secret", "key")]);
-    let (changed, out) = before(script, &request, &v);
+    let (changed, out) = before(script, &request, &v, &[]);
     assert_eq!(out.error, None);
     assert_eq!(out.vars, [("ts".to_string(), "1700000000".to_string()), ("meta".into(), r#"{"a":1}"#.into())]);
     assert_eq!(out.logs, [r#"тело {"tour": "Сочи"} {"n":1}"#]);
@@ -88,7 +88,7 @@ fn after_reads_the_response_and_tests_it() {
         test("sha", () => expect(crypto.sha256("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
         test("base64", () => expect(atob(btoa("Котик"))).toBe("Котик"));
     "#;
-    let out = after(script, &sent, &r, &Vars::new());
+    let out = after(script, &sent, &r, &Vars::new(), &[]);
     assert_eq!(out.error, None);
     assert_eq!(out.vars, [("order_id".to_string(), "42".to_string())]);
     let results: Vec<(&str, bool)> = out.tests.iter().map(|t| (t.name.as_str(), t.ok)).collect();
@@ -117,37 +117,37 @@ fn after_reads_the_response_and_tests_it() {
 fn errors_say_where_and_keep_what_was_done() {
     let r = response(200, "<html>");
     let sent = prepare(&Request { url: "http://x.test".into(), ..Request::default() }, &Vars::new(), Path::new(".")).unwrap();
-    let out = after("console.log('до');\nvars.set('a', 1);\nresponse.json();", &sent, &r, &Vars::new());
+    let out = after("console.log('до');\nvars.set('a', 1);\nresponse.json();", &sent, &r, &Vars::new(), &[]);
     assert_eq!(out.logs, ["до"]);
     assert_eq!(out.vars, [("a".to_string(), "1".to_string())]);
     let error = out.error.unwrap();
     assert!(error.starts_with("ответ не JSON"), "{error}");
     assert!(error.ends_with("(строка 3)"), "{error}");
 
-    let out = after("let x = ;", &sent, &r, &Vars::new());
+    let out = after("let x = ;", &sent, &r, &Vars::new(), &[]);
     assert!(out.error.unwrap().contains("строка 1"));
-    let out = after("throw 'строка'", &sent, &r, &Vars::new());
+    let out = after("throw 'строка'", &sent, &r, &Vars::new(), &[]);
     assert!(out.error.is_some());
 }
 
 #[test]
 fn a_runaway_script_is_stopped() {
     let started = Instant::now();
-    let (_, out) = before("while (true) {}", &Request::default(), &Vars::new());
+    let (_, out) = before("while (true) {}", &Request::default(), &Vars::new(), &[]);
     assert!(out.error.unwrap().contains("дольше"));
     assert!(started.elapsed() < TIME_LIMIT + Duration::from_secs(2));
-    let (_, out) = before("const a = []; while (true) a.push('x'.repeat(1 << 20));", &Request::default(), &Vars::new());
+    let (_, out) = before("const a = []; while (true) a.push('x'.repeat(1 << 20));", &Request::default(), &Vars::new(), &[]);
     assert!(out.error.is_some());
 }
 
 #[test]
 fn no_files_no_network_no_modules() {
     for script in ["require('fs')", "fetch('http://x')", "std.open('/etc/passwd')", "os.exec(['ls'])", "new XMLHttpRequest()"] {
-        let (_, out) = before(script, &Request::default(), &Vars::new());
+        let (_, out) = before(script, &Request::default(), &Vars::new(), &[]);
         assert!(out.error.is_some(), "{script}");
     }
     // A dynamic import has nothing to load modules from: it only rejects its promise.
-    let (_, out) = before("let got = 'нет'; import('os').then(() => got = 'да', (e) => got = String(e)).then(() => console.log(got))", &Request::default(), &Vars::new());
+    let (_, out) = before("let got = 'нет'; import('os').then(() => got = 'да', (e) => got = String(e)).then(() => console.log(got))", &Request::default(), &Vars::new(), &[]);
     assert_eq!(out.error, None);
     assert!(out.logs[0].contains("Error"), "{:?}", out.logs);
 }
@@ -162,7 +162,7 @@ fn postman_and_insomnia_scripts_run_as_they_are() {
         pm.request.url.query.add({ key: "v", value: "2" });
         console.log(pm.variables.replaceIn("{{base}}/x"), pm.info.eventName);
     "#;
-    let (changed, out) = super::before(before, &request, &vars(&[("base", "http://api.test")]));
+    let (changed, out) = super::before(before, &request, &vars(&[("base", "http://api.test")]), &[]);
     assert_eq!(out.error, None);
     assert_eq!(out.vars, [("ts".to_string(), "1700000000".to_string())]);
     assert_eq!(out.logs, ["http://api.test/x prerequest"]);
@@ -193,7 +193,7 @@ fn postman_and_insomnia_scripts_run_as_they_are() {
         pm.collectionVariables.set("token", body.token);
         postman.setEnvironmentVariable("user", "u-1");
     "#;
-    let out = super::after(after, &sent, &r, &Vars::new());
+    let out = super::after(after, &sent, &r, &Vars::new(), &[]);
     assert_eq!(out.error, None);
     let results: Vec<(&str, bool)> = out.tests.iter().map(|t| (t.name.as_str(), t.ok)).collect();
     assert_eq!(
@@ -213,4 +213,42 @@ fn postman_and_insomnia_scripts_run_as_they_are() {
     assert_eq!(out.vars, [("token".to_string(), "t-1".to_string()), ("user".into(), "u-1".into())]);
     assert_eq!(sets(after), ["token", "user"]);
     assert_eq!(reads("pm.environment.get('a'); insomnia.environment.get(\"b\"); postman.getGlobalVariable('c')"), ["a", "b", "c"]);
+}
+
+#[test]
+fn cookies_of_the_jar_and_of_the_response() {
+    let mut jar = crate::cookies::Jar::default();
+    let url: url::Url = "http://api.test/orders".parse().unwrap();
+    jar.store(&url, "session=s1; Path=/; HttpOnly");
+    jar.store(&url, "theme=dark");
+    jar.store(&"http://other.test/".parse().unwrap(), "elsewhere=1");
+    let cookies = jar.for_url(&url);
+    let script = r#"
+        test("наш", () => expect(cookies.get("session")).toBe("s1"));
+        test("pm", () => pm.expect(pm.cookies.has("theme", "dark")).to.be.true);
+        test("объект", () => expect(pm.cookies.toObject()).toEqual({ session: "s1", theme: "dark" }));
+        test("чужого нет", () => expect(cookies.has("elsewhere")).toBe(false));
+        test("свойства", () => expect(cookies.one("session").httpOnly).toBe(true));
+    "#;
+    let (_, out) = before(script, &Request::default(), &Vars::new(), &cookies);
+    assert_eq!(out.error, None);
+    assert!(out.tests.iter().all(|t| t.ok), "{:?}", out.tests);
+
+    let sent = prepare(&Request { url: url.to_string(), ..Request::default() }, &Vars::new(), Path::new(".")).unwrap();
+    let mut r = response(200, "{}");
+    r.headers.push(("Set-Cookie".into(), "token=t-1; Domain=.api.test; Path=/; Max-Age=60; Secure; HttpOnly".into()));
+    r.headers.push(("set-cookie".into(), "gone=; Expires=Thu, 01 Jan 1970 00:00:00 GMT".into()));
+    let script = r#"
+        test("из ответа", () => expect(pm.response.cookies.get("token")).toBe("t-1"));
+        test("атрибуты", () => {
+            const t = response.cookies.one("token");
+            expect([t.domain, t.path, t.secure, t.httpOnly, t.expires > new Date()]).toEqual(["api.test", "/", true, true, true]);
+        });
+        test("два", () => expect(response.cookies.count()).toBe(2));
+        test("jar", () => pm.cookies.jar());
+    "#;
+    let out = after(script, &sent, &r, &Vars::new(), &cookies);
+    let results: Vec<(&str, bool)> = out.tests.iter().map(|t| (t.name.as_str(), t.ok)).collect();
+    assert_eq!(results, [("из ответа", true), ("атрибуты", true), ("два", true), ("jar", false)], "{:?}", out.tests);
+    assert!(out.tests[3].error.as_deref().unwrap().contains("pm.cookies.jar() в TsubameDo нет"));
 }

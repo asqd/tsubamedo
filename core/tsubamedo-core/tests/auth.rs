@@ -129,8 +129,12 @@ async fn cookies_set_on_a_redirect_come_back() {
     let (addr, _) = server().await;
     let jar = Jar::default().shared();
     let mut r = runner(SendOptions { cookies: Some(jar.clone()), ..SendOptions::default() });
-    let ex = r.send(None, &get(format!("http://{addr}/login"), Auth::None), Path::new(".")).await.pop().unwrap();
+    // The script after sees the jar with what the login just set.
+    let mut login = get(format!("http://{addr}/login"), Auth::None);
+    login.scripts.after = "pm.test('сессия', () => pm.expect(pm.cookies.get('session')).to.eql('s1'));".into();
+    let ex = r.send(None, &login, Path::new(".")).await.pop().unwrap();
     assert_eq!(ex.result.as_ref().unwrap().status, 200, "the redirect to /me carried the session");
+    assert!(ex.checks.iter().all(|c| c.ok) && ex.checks.len() == 1, "{:?}", ex.checks);
 
     let ex = r.send(None, &get(format!("http://{addr}/me"), Auth::None), Path::new(".")).await.pop().unwrap();
     assert_eq!(ex.result.as_ref().unwrap().status, 200);

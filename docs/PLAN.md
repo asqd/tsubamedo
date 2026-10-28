@@ -160,8 +160,11 @@ Postman. У нас — точечное сохранение файлов без
       скрипты Postman и Insomnia работают через `pm`/`insomnia`/`CryptoJS` поверх нашего API.
       `tsubamedo import` и ⇣ в приложении (новой коллекцией или папкой в открытую).
       OAuth 2.0 переносится настройками (Postman, Insomnia, `securitySchemes`).
-- [ ] Импорт: `pm.cookies`, `$random*` из Postman, внешние `$ref` в
-      OpenAPI.
+- [x] Все случайные переменные Postman (`fake.rs`, около 130: `$randomEmail`, `$randomPrice`,
+      картинки по темам…) — на маленьких словарях; тег `{% faker %}` Insomnia — в них же.
+- [x] `pm.cookies` и `cookies` в скриптах: банка окружения для адреса запроса (после ответа — с
+      поставленными им), `pm.response.cookies` — из Set-Cookie ответа. `pm.cookies.jar()` — нет.
+- [ ] Импорт: внешние `$ref` в OpenAPI.
 
 Протоколы (GraphQL, WebSocket и SSE, gRPC) отложены: нужны реже, чем этап 4, — см. «Потом».
 
@@ -241,7 +244,7 @@ Postman. У нас — точечное сохранение файлов без
 - [ ] WebSocket и SSE.
 - [ ] gRPC через reflection и `.proto`.
 - [ ] OAuth 2.0 для адресов возврата не на этом компьютере (встроенное окно входа, как у
-      Insomnia), `pm.cookies` в скриптах, правка cookie вручную.
+      Insomnia), правка cookie вручную.
 
 ## Выпуск
 

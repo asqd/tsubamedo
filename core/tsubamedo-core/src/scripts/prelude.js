@@ -62,6 +62,56 @@
   };
   globalThis.vars = Object.freeze(vars);
 
+  // ---- cookies: those of the environment's jar that go to the request's address ----
+  const cookieList = (list) =>
+    Object.freeze({
+      get: (name) => list.find((c) => c.name === name)?.value,
+      has: (name, value) => list.some((c) => c.name === name && (value === undefined || c.value === value)),
+      one: (name) => list.find((c) => c.name === name),
+      all: () => list.slice(),
+      toObject: () => Object.fromEntries(list.map((c) => [c.name, c.value])),
+      count: () => list.length,
+      each: (fn) => list.forEach(fn),
+      filter: (fn) => list.filter(fn),
+      find: (fn) => list.find(fn),
+      map: (fn) => list.map(fn),
+      idx: (i) => list[i],
+    });
+  const cookie = (c) =>
+    Object.freeze({
+      name: c.name,
+      value: c.value,
+      domain: c.domain ?? null,
+      path: c.path ?? null,
+      expires: c.expires == null ? null : new Date(c.expires * 1000),
+      secure: Boolean(c.secure),
+      httpOnly: Boolean(c.httpOnly),
+      hostOnly: Boolean(c.hostOnly),
+    });
+  globalThis.cookies = cookieList((input.cookies ?? []).map(cookie));
+  // What a response set, from its Set-Cookie headers as written.
+  const setCookies = (headers) =>
+    headers
+      .filter((h) => h.name.toLowerCase() === "set-cookie")
+      .map((h) => {
+        const [pair, ...attrs] = h.value.split(";");
+        const eq = pair.indexOf("=");
+        const c = { name: pair.slice(0, eq).trim(), value: pair.slice(eq + 1).trim() };
+        for (const a of attrs) {
+          const [k, ...v] = a.split("=");
+          const key = k.trim().toLowerCase();
+          const val = v.join("=").trim();
+          if (key === "domain") c.domain = val.replace(/^\./, "").toLowerCase();
+          else if (key === "path") c.path = val;
+          else if (key === "expires" && !Number.isNaN(Date.parse(val))) c.expires = Date.parse(val) / 1000;
+          else if (key === "max-age") c.expires = Date.now() / 1000 + Number(val);
+          else if (key === "secure") c.secure = true;
+          else if (key === "httponly") c.httpOnly = true;
+        }
+        return cookie(c);
+      })
+      .filter((c) => c.name);
+
   // ---- request and response ----
   const pairs = (list, ignoreCase, readonly, what) => {
     const same = (a, b) => (ignoreCase ? a.toLowerCase() === b.toLowerCase() : a === b);
@@ -134,6 +184,7 @@
       time: res.time,
       size: res.size,
       headers: pairs(res.headers, true, true, "Заголовки ответа"),
+      cookies: cookieList(setCookies(res.headers)),
       text() {
         if (res.body === null) throw new Error(res.bodyError);
         return res.body;
